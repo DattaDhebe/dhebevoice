@@ -7,12 +7,13 @@ import '../models/novel_book.dart';
 import 'novel_import_controller.dart';
 import 'tts_service.dart';
 
-class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
+class ReaderAudioHandler extends BaseAudioHandler
+    with QueueHandler, SeekHandler {
   ReaderAudioHandler({
     required TtsService ttsService,
     required NovelImportController novelImportController,
-  })  : _ttsService = ttsService,
-        _novelImportController = novelImportController {
+  }) : _ttsService = ttsService,
+       _novelImportController = novelImportController {
     _ttsService.addListener(_broadcastPlaybackState);
     _novelImportController.addListener(_broadcastLibraryState);
     _broadcastLibraryState();
@@ -21,6 +22,12 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
 
   final TtsService _ttsService;
   final NovelImportController _novelImportController;
+  List<NovelChapter>? _lastChapters;
+  String? _lastBookId;
+  String? _lastBookTitle;
+  int? _lastChapterIndex;
+  String? _lastLanguage;
+  (ReaderPlaybackState, int, bool, bool)? _lastPlaybackSnapshot;
 
   @override
   Future<void> play() => _ttsService.play();
@@ -61,7 +68,8 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
 
   @override
   Future<void> skipToNext() async {
-    final canAdvance = _novelImportController.activeNovel != null &&
+    final canAdvance =
+        _novelImportController.activeNovel != null &&
         _novelImportController.activeChapterIndex <
             _novelImportController.activeNovel!.chapters.length - 1;
     if (!canAdvance) {
@@ -69,8 +77,10 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
     }
 
     final shouldResume = _ttsService.isPlaying;
-    await _novelImportController.goToNextChapter();
-    if (shouldResume) {
+    final change = _novelImportController.goToNextChapter();
+    final session = _ttsService.playbackSessionId;
+    await change;
+    if (shouldResume && session == _ttsService.playbackSessionId) {
       await _ttsService.play();
     }
   }
@@ -83,14 +93,31 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
     }
 
     final shouldResume = _ttsService.isPlaying;
-    await _novelImportController.goToPreviousChapter();
-    if (shouldResume) {
+    final change = _novelImportController.goToPreviousChapter();
+    final session = _ttsService.playbackSessionId;
+    await change;
+    if (shouldResume && session == _ttsService.playbackSessionId) {
       await _ttsService.play();
     }
   }
 
   void _broadcastLibraryState() {
     final activeNovel = _novelImportController.activeNovel;
+    final chapterIndex = _novelImportController.activeChapterIndex;
+    final libraryChanged =
+        !identical(_lastChapters, activeNovel?.chapters) ||
+        _lastBookId != activeNovel?.id ||
+        _lastBookTitle != activeNovel?.title;
+    if (!libraryChanged &&
+        _lastChapterIndex == chapterIndex &&
+        _lastLanguage == _ttsService.selectedLanguage) {
+      return;
+    }
+    _lastChapters = activeNovel?.chapters;
+    _lastBookId = activeNovel?.id;
+    _lastBookTitle = activeNovel?.title;
+    _lastChapterIndex = chapterIndex;
+    _lastLanguage = _ttsService.selectedLanguage;
 
     if (activeNovel == null || activeNovel.chapters.isEmpty) {
       queue.add(const <MediaItem>[]);
@@ -106,15 +133,15 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
       return;
     }
 
-    final items = activeNovel.chapters
-        .map(
-          (chapter) => _chapterToMediaItem(
-            novel: activeNovel,
-            chapter: chapter,
-          ),
-        )
-        .toList(growable: false);
-    queue.add(items);
+    final items = libraryChanged
+        ? activeNovel.chapters
+              .map(
+                (chapter) =>
+                    _chapterToMediaItem(novel: activeNovel, chapter: chapter),
+              )
+              .toList(growable: false)
+        : queue.value;
+    if (libraryChanged) queue.add(items);
 
     final selectedIndex = _novelImportController.activeChapterIndex.clamp(
       0,
@@ -141,9 +168,19 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
     final activeNovel = _novelImportController.activeNovel;
     final hasPrevious =
         activeNovel != null && _novelImportController.activeChapterIndex > 0;
-    final hasNext = activeNovel != null &&
+    final hasNext =
+        activeNovel != null &&
         _novelImportController.activeChapterIndex <
             activeNovel.chapters.length - 1;
+
+    final snapshot = (
+      _ttsService.playbackState,
+      _novelImportController.activeChapterIndex,
+      hasPrevious,
+      hasNext,
+    );
+    if (_lastPlaybackSnapshot == snapshot) return;
+    _lastPlaybackSnapshot = snapshot;
 
     final controls = <MediaControl>[
       if (hasPrevious) MediaControl.skipToPrevious,
@@ -154,15 +191,16 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
 
     final processingState = switch (_ttsService.playbackState) {
       ReaderPlaybackState.idle => AudioProcessingState.idle,
+      ReaderPlaybackState.stopped => AudioProcessingState.idle,
       ReaderPlaybackState.playing ||
-      ReaderPlaybackState.paused ||
-      ReaderPlaybackState.stopped => AudioProcessingState.ready,
+      ReaderPlaybackState.paused => AudioProcessingState.ready,
       ReaderPlaybackState.completed => AudioProcessingState.completed,
       ReaderPlaybackState.error => AudioProcessingState.error,
     };
 
     final playPauseIndex = controls.indexWhere(
-      (control) => control == MediaControl.play || control == MediaControl.pause,
+      (control) =>
+          control == MediaControl.play || control == MediaControl.pause,
     );
     final stopIndex = controls.indexOf(MediaControl.stop);
     final nextIndex = controls.indexOf(MediaControl.skipToNext);
@@ -171,10 +209,7 @@ class ReaderAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler
     final compactActionIndices = <int>[
       if (playPauseIndex >= 0) playPauseIndex,
       if (stopIndex >= 0) stopIndex,
-      if (nextIndex >= 0)
-        nextIndex
-      else if (previousIndex >= 0)
-        previousIndex,
+      if (nextIndex >= 0) nextIndex else if (previousIndex >= 0) previousIndex,
     ];
 
     playbackState.add(

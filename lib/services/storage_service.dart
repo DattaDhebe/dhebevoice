@@ -35,8 +35,12 @@ class StorageService {
   String? get themeMode => _prefs.getString(_themeModeKey);
   String? get webAccessModeId => _prefs.getString(_webAccessModeKey);
   bool get hasSeenHomeGuide => _prefs.getBool(_homeGuideSeenKey) ?? false;
-  bool get hasSeededSampleBook =>
-      _prefs.getBool(_sampleBookSeededKey) ?? false;
+  bool get hasSeededSampleBook => _prefs.getBool(_sampleBookSeededKey) ?? false;
+
+  int? chapterIndexForNovel(String id) => _prefs.getInt('reader_chapter_$id');
+
+  Future<void> saveNovelChapterIndex(String id, int index) =>
+      _prefs.setInt('reader_chapter_$id', index);
 
   Future<void> saveText(String value) => _prefs.setString(_textKey, value);
   Future<void> saveLanguage(String value) =>

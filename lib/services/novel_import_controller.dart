@@ -14,11 +14,11 @@ class NovelImportController extends ChangeNotifier {
     required NovelLibraryService novelLibraryService,
     required WebNovelImportService webNovelImportService,
     required TtsService ttsService,
-  })  : _storageService = storageService,
-        _fileImportService = fileImportService,
-        _novelLibraryService = novelLibraryService,
-        _webNovelImportService = webNovelImportService,
-        _ttsService = ttsService {
+  }) : _storageService = storageService,
+       _fileImportService = fileImportService,
+       _novelLibraryService = novelLibraryService,
+       _webNovelImportService = webNovelImportService,
+       _ttsService = ttsService {
     _ttsService.setPlaybackCompletedHandler(_handlePlaybackCompleted);
   }
 
@@ -38,6 +38,8 @@ class NovelImportController extends ChangeNotifier {
   double? _importProgress;
   String _selectedWebAccessModeId = WebNovelImportService.defaultAccessModeId;
   String? _pendingSharedUrl;
+  int _chapterActivationId = 0;
+  Future<void>? _initialization;
 
   List<NovelBook> get library => _library;
   NovelBook? get activeNovel => _activeNovel;
@@ -56,11 +58,41 @@ class NovelImportController extends ChangeNotifier {
 
   NovelChapter? get activeChapter =>
       _activeNovel == null || _activeNovel!.chapters.isEmpty
-          ? null
-          : _activeNovel!.chapters[_activeChapterIndex];
+      ? null
+      : _activeNovel!.chapters[_activeChapterIndex];
 
-  Future<void> initialize() async {
-    _library = await _novelLibraryService.loadLibrary();
+  Future<void> initialize() => _initialization ??= _initializeSafely();
+
+  Future<void> _initializeSafely() async {
+    try {
+      await _initialize();
+    } catch (error) {
+      _errorMessage =
+          'Could not prepare your Book List. Please try reopening the app.';
+      debugPrint('Library initialization failed: $error');
+      notifyListeners();
+    }
+  }
+
+  Future<void> _initialize() async {
+    try {
+      _library = await _novelLibraryService.loadLibrary();
+    } catch (error) {
+      _errorMessage =
+          'Could not load your Book List. Your saved file has not been changed.';
+      debugPrint('Library load failed: $error');
+      notifyListeners();
+      return;
+    }
+    _library = _library
+        .map(
+          (book) => book.copyWith(
+            lastReadChapterIndex:
+                _storageService.chapterIndexForNovel(book.id) ??
+                book.lastReadChapterIndex,
+          ),
+        )
+        .toList();
     if (_library.isEmpty && !_storageService.hasSeededSampleBook) {
       _library = [_buildSampleBook()];
       await _novelLibraryService.saveLibrary(_library);
@@ -76,18 +108,21 @@ class NovelImportController extends ChangeNotifier {
     }
 
     final novelIndex = _library.indexWhere((entry) => entry.id == savedNovelId);
-    if (novelIndex < 0) {
+    if (novelIndex < 0 || _library[novelIndex].chapters.isEmpty) {
       notifyListeners();
       return;
     }
 
     _activeNovel = _library[novelIndex];
-    _activeChapterIndex = _storageService.activeChapterIndex
-        .clamp(0, _activeNovel!.chapters.length - 1);
+    _activeChapterIndex = _storageService.activeChapterIndex.clamp(
+      0,
+      _activeNovel!.chapters.length - 1,
+    );
     notifyListeners();
   }
 
   Future<void> handleSharedPayload(String value) async {
+    await initialize();
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
       return;
@@ -144,6 +179,8 @@ class NovelImportController extends ChangeNotifier {
   }
 
   Future<void> importLocalFile() async {
+    await initialize();
+    if (_isImporting) return;
     _errorMessage = null;
     _importStatus = null;
     notifyListeners();
@@ -203,15 +240,13 @@ class NovelImportController extends ChangeNotifier {
   }
 
   Future<void> importNovelFromUrl(String url, {String? accessModeId}) async {
+    await initialize();
+    if (_isImporting) return;
+    _isImporting = true;
     final resolvedAccessModeId = WebNovelImportService.normalizeAccessModeId(
       accessModeId ?? _selectedWebAccessModeId,
     );
-    if (_selectedWebAccessModeId != resolvedAccessModeId) {
-      _selectedWebAccessModeId = resolvedAccessModeId;
-      await _storageService.saveWebAccessModeId(resolvedAccessModeId);
-    }
-
-    _isImporting = true;
+    _selectedWebAccessModeId = resolvedAccessModeId;
     _isCancellingImport = false;
     _importStatus = 'Connecting to source...';
     _importProgress = null;
@@ -220,6 +255,7 @@ class NovelImportController extends ChangeNotifier {
     var completedWithoutCancellation = false;
 
     try {
+      await _storageService.saveWebAccessModeId(resolvedAccessModeId);
       final result = await _webNovelImportService.importNovelResultFromUrl(
         url,
         accessModeId: resolvedAccessModeId,
@@ -302,8 +338,8 @@ class NovelImportController extends ChangeNotifier {
     }
 
     final novel = _library[novelIndex];
-    final resolvedChapterIndex = chapterIndex ??
-        novel.lastReadChapterIndex.clamp(0, novel.chapters.length - 1);
+    final resolvedChapterIndex = (chapterIndex ?? novel.lastReadChapterIndex)
+        .clamp(0, novel.chapters.length - 1);
 
     await _activateChapter(
       novel: novel,
@@ -314,7 +350,9 @@ class NovelImportController extends ChangeNotifier {
 
   Future<void> selectChapter(int chapterIndex) async {
     final novel = _activeNovel;
-    if (novel == null || chapterIndex < 0 || chapterIndex >= novel.chapters.length) {
+    if (novel == null ||
+        chapterIndex < 0 ||
+        chapterIndex >= novel.chapters.length) {
       return;
     }
 
@@ -326,6 +364,7 @@ class NovelImportController extends ChangeNotifier {
   }
 
   Future<void> clearActiveNovel() async {
+    _chapterActivationId++;
     _activeNovel = null;
     _activeChapterIndex = 0;
     await _storageService.saveActiveNovelId(null);
@@ -385,10 +424,11 @@ class NovelImportController extends ChangeNotifier {
       _activeNovel = _library[novelIndex];
     }
 
-    await _novelLibraryService.saveLibrary(_library);
+    await _storageService.saveNovelChapterIndex(novelId, chapterIndex);
   }
 
   Future<void> _handlePlaybackCompleted() async {
+    final session = _ttsService.playbackSessionId;
     final novel = _activeNovel;
     if (novel == null) {
       return;
@@ -403,8 +443,14 @@ class NovelImportController extends ChangeNotifier {
       chapterIndex: nextIndex,
       persistLastRead: true,
       stopPlayback: false,
+      expectedPlaybackSession: session,
     );
-    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (_ttsService.playbackSessionId != session ||
+        _ttsService.playbackState != ReaderPlaybackState.completed ||
+        _activeNovel?.id != novel.id ||
+        _activeChapterIndex != nextIndex) {
+      return;
+    }
     await _ttsService.play();
   }
 
@@ -413,23 +459,35 @@ class NovelImportController extends ChangeNotifier {
     required int chapterIndex,
     required bool persistLastRead,
     bool stopPlayback = true,
+    int? expectedPlaybackSession,
   }) async {
-    _activeNovel = novel;
-    _activeChapterIndex = chapterIndex;
-    notifyListeners();
+    final activation = ++_chapterActivationId;
+    bool isCurrent() => activation == _chapterActivationId;
+    if (stopPlayback) await _ttsService.stop();
+    if (!isCurrent()) return;
+    if (expectedPlaybackSession != null &&
+        expectedPlaybackSession != _ttsService.playbackSessionId) {
+      return;
+    }
 
-    await _storageService.saveActiveNovelId(novel.id);
-    await _storageService.saveActiveChapterIndex(chapterIndex);
-    if (persistLastRead) {
-      await _updateLastReadChapter(novel.id, chapterIndex);
-    }
-    if (stopPlayback) {
-      await _ttsService.stop();
-    }
-    await _ttsService.updateText(
+    final textUpdate = _ttsService.updateText(
       novel.chapters[chapterIndex].content,
       resetPosition: true,
     );
+    _activeNovel = novel;
+    _activeChapterIndex = chapterIndex;
+    notifyListeners();
+    await textUpdate;
+    if (!isCurrent()) return;
+
+    await _storageService.saveActiveNovelId(novel.id);
+    if (!isCurrent()) return;
+    await _storageService.saveActiveChapterIndex(chapterIndex);
+    if (!isCurrent()) return;
+    if (persistLastRead) {
+      await _updateLastReadChapter(novel.id, chapterIndex);
+    }
+    if (!isCurrent()) return;
     notifyListeners();
   }
 

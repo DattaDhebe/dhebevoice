@@ -103,31 +103,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const _GuideRow(
                   icon: Icons.edit_note_rounded,
                   title: 'Paste or import text',
-                  body: 'Use the editor, import a file, or share a web link from your browser.',
+                  body:
+                      'Use the editor, import a file, or share a web link from your browser.',
                 ),
                 const SizedBox(height: 14),
                 const _GuideRow(
                   icon: Icons.play_circle_outline_rounded,
                   title: 'Start playback',
-                  body: 'Use Play, Pause, and Stop at the bottom to control reading aloud.',
+                  body:
+                      'Use Play, Pause, and Stop at the bottom to control reading aloud.',
                 ),
                 const SizedBox(height: 14),
                 const _GuideRow(
                   icon: Icons.library_books_outlined,
                   title: 'Open your Book List',
-                  body: 'Imported books and web pages stay in your library so you can return later.',
+                  body:
+                      'Imported books and web pages stay in your library so you can return later.',
                 ),
                 const SizedBox(height: 14),
                 const _GuideRow(
                   icon: Icons.menu_book_rounded,
                   title: 'Jump by chapter or paragraph',
-                  body: 'Use Chapters and Play from paragraph to continue from the exact place you want.',
+                  body:
+                      'Use Chapters and Play from paragraph to continue from the exact place you want.',
                 ),
                 const SizedBox(height: 14),
                 const _GuideRow(
                   icon: Icons.tune_rounded,
                   title: 'Choose your voice',
-                  body: 'Open Settings to change voice, speed, pitch, volume, and theme.',
+                  body:
+                      'Open Settings to change voice, speed, pitch, volume, and theme.',
                 ),
               ],
             ),
@@ -148,8 +153,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _listenForSharedText() async {
     final importer = context.read<NovelImportController>();
 
-    _shareSubscription =
-        ReceiveSharingIntent.instance.getMediaStream().listen((value) async {
+    _shareSubscription = ReceiveSharingIntent.instance.getMediaStream().listen((
+      value,
+    ) async {
       final sharedText = _extractSharedText(value);
       if (sharedText != null) {
         await _handleIncomingSharedText(importer, sharedText);
@@ -214,8 +220,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Text(
                   'Import only text you own, are licensed to access, or that is in the public domain.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -253,7 +259,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             height: MediaQuery.of(context).size.height * 0.72,
             child: importer.library.isEmpty
                 ? const Center(
-                    child: Text('Imported books and web pages will appear here.'),
+                    child: Text(
+                      'Imported books and web pages will appear here.',
+                    ),
                   )
                 : ListView.builder(
                     itemCount: importer.library.length + 1,
@@ -263,9 +271,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                           child: Text(
                             'Book List',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                ),
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w800),
                           ),
                         );
                       }
@@ -415,11 +422,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       builder: (context) {
         final dialogWidth = min(MediaQuery.sizeOf(context).width * 0.9, 620.0);
-        final dialogHeight =
-            min(MediaQuery.sizeOf(context).height * 0.6, 540.0);
+        final dialogHeight = min(
+          MediaQuery.sizeOf(context).height * 0.6,
+          540.0,
+        );
 
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
@@ -427,8 +439,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               builder: (context, importer, ttsService, _) {
                 final colorScheme = Theme.of(context).colorScheme;
                 final activeTitle = importer.activeChapter?.title ?? '';
-                final chapterText =
-                    activeTitle.trim().isNotEmpty ? activeTitle : 'Manual text';
+                final chapterText = activeTitle.trim().isNotEmpty
+                    ? activeTitle
+                    : 'Manual text';
 
                 return Padding(
                   padding: const EdgeInsets.all(24),
@@ -441,9 +454,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           Expanded(
                             child: Text(
                               'Now reading',
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w800),
                             ),
                           ),
                           IconButton(
@@ -456,16 +468,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       const SizedBox(height: 8),
                       Text(
                         chapterText,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 10),
                       Row(
                         children: [
                           IconButton.filledTonal(
                             onPressed: ttsService.currentParagraphIndex > 0
-                                ? () => unawaited(ttsService.playPreviousParagraph())
+                                ? () => unawaited(
+                                    ttsService.playPreviousParagraph(),
+                                  )
                                 : null,
                             icon: const Icon(Icons.chevron_left),
                           ),
@@ -473,16 +486,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             child: Text(
                               'Paragraph ${ttsService.currentParagraphIndex + 1}',
                               textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
                                     color: colorScheme.onSurfaceVariant,
                                     fontWeight: FontWeight.w600,
                                   ),
                             ),
                           ),
                           IconButton.filledTonal(
-                            onPressed: ttsService.currentParagraphIndex <
+                            onPressed:
+                                ttsService.currentParagraphIndex <
                                     ttsService.paragraphCount - 1
-                                ? () => unawaited(ttsService.playNextParagraph())
+                                ? () =>
+                                      unawaited(ttsService.playNextParagraph())
                                 : null,
                             icon: const Icon(Icons.chevron_right),
                           ),
@@ -493,7 +509,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         child: SingleChildScrollView(
                           child: Text(
                             ttsService.currentParagraph,
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
                                   height: 1.6,
                                   color: colorScheme.primary,
                                   fontSize: 18,
@@ -506,11 +523,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       PlayerControls(
                         isPlaying: ttsService.isPlaying,
                         canResume:
-                            ttsService.isPaused || ttsService.currentCharIndex > 0,
-                        onPlay: () => unawaited(_playUsingBestAvailableController()),
+                            ttsService.isPaused ||
+                            ttsService.currentCharIndex > 0,
+                        onPlay: () =>
+                            unawaited(_playUsingBestAvailableController()),
                         onPause: () =>
                             unawaited(_pauseUsingBestAvailableController()),
-                        onStop: () => unawaited(_stopUsingBestAvailableController()),
+                        onStop: () =>
+                            unawaited(_stopUsingBestAvailableController()),
                         wrapInSafeArea: false,
                       ),
                     ],
@@ -529,14 +549,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       builder: (context) {
         final dialogWidth = min(MediaQuery.sizeOf(context).width * 0.94, 760.0);
-        final dialogHeight =
-            min(MediaQuery.sizeOf(context).height * 0.76, 680.0);
+        final dialogHeight = min(
+          MediaQuery.sizeOf(context).height * 0.76,
+          680.0,
+        );
         final contentText = _textController.text.trim().isEmpty
             ? 'Paste text here, import a file, or share a web link from your browser.'
             : _textController.text;
 
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 24,
+          ),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
@@ -550,10 +575,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Expanded(
                         child: Text(
                           'Reading content',
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                       ),
                       IconButton(
@@ -569,7 +592,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceContainerLow,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLow,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                           color: Theme.of(context).colorScheme.outlineVariant,
@@ -579,10 +604,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         child: SingleChildScrollView(
                           child: Text(
                             contentText,
-                            style:
-                                Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      height: 1.55,
-                                    ),
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodyLarge?.copyWith(height: 1.55),
                           ),
                         ),
                       ),
@@ -601,8 +625,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     for (final item in sharedItems) {
       final candidate = switch (item.type) {
         SharedMediaType.text || SharedMediaType.url => item.path,
-        SharedMediaType.file || SharedMediaType.image || SharedMediaType.video =>
-          item.message,
+        SharedMediaType.file ||
+        SharedMediaType.image ||
+        SharedMediaType.video => item.message,
       };
 
       if (candidate != null && candidate.trim().isNotEmpty) {
@@ -614,7 +639,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String _chapterBadgeLabel(NovelChapter chapter, int index) {
-    final chapterNumber = _extractChapterNumber(chapter.title) ??
+    final chapterNumber =
+        _extractChapterNumber(chapter.title) ??
         _extractChapterNumber(chapter.url) ??
         (index + 1);
     return '#$chapterNumber';
@@ -753,7 +779,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _syncImportDialog(importer);
         final isKeyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
         final audioHandlerController = context.watch<AudioHandlerController>();
-        final controlsReady = ttsService.hasInitialized;
+        final controlsReady =
+            ttsService.hasInitialized && audioHandlerController.isReady;
+        final startupError =
+            audioHandlerController.errorMessage ?? ttsService.errorMessage;
 
         if (_textController.text != ttsService.text) {
           _textController.value = TextEditingValue(
@@ -794,9 +823,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 tooltip: 'Settings',
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const SettingsScreen(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
                   );
                 },
                 icon: const Icon(Icons.tune),
@@ -814,12 +841,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   isPlaying: ttsService.isPlaying,
                   canResume:
                       ttsService.isPaused || ttsService.currentCharIndex > 0,
-                  onPlay: () =>
-                      unawaited(_playUsingBestAvailableController()),
+                  onPlay: () => unawaited(_playUsingBestAvailableController()),
                   onPause: () =>
                       unawaited(_pauseUsingBestAvailableController()),
-                  onStop: () =>
-                      unawaited(_stopUsingBestAvailableController()),
+                  onStop: () => unawaited(_stopUsingBestAvailableController()),
                 ),
               ),
             ),
@@ -836,7 +861,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ScrollViewKeyboardDismissBehavior.onDrag,
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   children: [
-                    if (ttsService.isInitializing) ...[
+                    if (startupError != null) ...[
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Text(
+                            startupError,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (startupError == null && !controlsReady) ...[
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(18),
@@ -845,8 +883,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               const SizedBox(
                                 width: 22,
                                 height: 22,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2.6),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.6,
+                                ),
                               ),
                               const SizedBox(width: 14),
                               Expanded(
@@ -858,13 +897,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               if (!audioHandlerController.isReady)
                                 Text(
                                   'Starting',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelMedium
+                                  style: Theme.of(context).textTheme.labelMedium
                                       ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
                                 ),
                             ],
@@ -887,12 +924,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       _ImportStatusCard(
                         importer: importer,
                         onStartImport: _showImportUrlDialog,
-                        onStartPendingImport: () => unawaited(
-                          importer.importPendingSharedUrl(),
-                        ),
-                        onClearSharedLink: () => unawaited(
-                          importer.clearPendingSharedUrl(),
-                        ),
+                        onStartPendingImport: () =>
+                            unawaited(importer.importPendingSharedUrl()),
+                        onClearSharedLink: () =>
+                            unawaited(importer.clearPendingSharedUrl()),
                       ),
                     if (importer.activeNovel != null) ...[
                       if (importer.isImporting && _isImportDialogMinimized)
@@ -903,14 +938,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       _ActiveNovelCard(
                         importer: importer,
                         onOpenChapters: _showChapterSheet,
-                        onPreviousChapter: () =>
-                            unawaited(
-                              _skipToPreviousUsingBestAvailableController(),
-                            ),
-                        onNextChapter: () =>
-                            unawaited(
-                              _skipToNextUsingBestAvailableController(),
-                            ),
+                        onPreviousChapter: () => unawaited(
+                          _skipToPreviousUsingBestAvailableController(),
+                        ),
+                        onNextChapter: () => unawaited(
+                          _skipToNextUsingBestAvailableController(),
+                        ),
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -949,16 +982,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   maxLines: null,
                                   expands: true,
                                   textAlignVertical: TextAlignVertical.top,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyLarge
-                                      ?.copyWith(
-                                        height: 1.5,
-                                      ),
-                                  contextMenuBuilder:
-                                      (context, editableTextState) {
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.bodyLarge?.copyWith(height: 1.5),
+                                  contextMenuBuilder: (context, editableTextState) {
                                     final selection = editableTextState
-                                        .textEditingValue.selection;
+                                        .textEditingValue
+                                        .selection;
                                     final buttonItems = <ContextMenuButtonItem>[
                                       ...editableTextState
                                           .contextMenuButtonItems,
@@ -977,8 +1007,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         ),
                                     ];
 
-                                    return AdaptiveTextSelectionToolbar
-                                        .buttonItems(
+                                    return AdaptiveTextSelectionToolbar.buttonItems(
                                       anchors:
                                           editableTextState.contextMenuAnchors,
                                       buttonItems: buttonItems,
@@ -998,7 +1027,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     contentPadding: EdgeInsets.zero,
                                   ),
                                   onChanged: (value) {
-                                    unawaited(importer.detachIfTextChanged(value));
+                                    unawaited(
+                                      importer.detachIfTextChanged(value),
+                                    );
                                     unawaited(ttsService.updateText(value));
                                   },
                                 ),
@@ -1046,9 +1077,9 @@ class _ChapterBadge extends StatelessWidget {
         label,
         textAlign: TextAlign.center,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.onPrimaryContainer,
-              fontWeight: FontWeight.w700,
-            ),
+          color: Theme.of(context).colorScheme.onPrimaryContainer,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -1079,10 +1110,7 @@ class _GuideRow extends StatelessWidget {
             color: colorScheme.primaryContainer,
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Icon(
-            icon,
-            color: colorScheme.onPrimaryContainer,
-          ),
+          child: Icon(icon, color: colorScheme.onPrimaryContainer),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -1091,9 +1119,9 @@ class _GuideRow extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 4),
               Text(
@@ -1112,9 +1140,7 @@ class _GuideRow extends StatelessWidget {
 }
 
 class _ImportProgressDialog extends StatelessWidget {
-  const _ImportProgressDialog({
-    required this.onMinimize,
-  });
+  const _ImportProgressDialog({required this.onMinimize});
 
   final VoidCallback onMinimize;
 
@@ -1132,9 +1158,7 @@ class _ImportProgressDialog extends StatelessWidget {
           return AlertDialog(
             title: Row(
               children: [
-                const Expanded(
-                  child: Text('Importing web content'),
-                ),
+                const Expanded(child: Text('Importing web content')),
                 IconButton(
                   tooltip: 'Close',
                   onPressed: onMinimize,
@@ -1159,16 +1183,16 @@ class _ImportProgressDialog extends StatelessWidget {
                     Text(
                       '$progressPercent% complete',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurface,
-                          ),
+                        color: colorScheme.onSurface,
+                      ),
                     ),
                   ] else ...[
                     const SizedBox(height: 10),
                     Text(
                       'Following links and importing text...',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurface,
-                          ),
+                        color: colorScheme.onSurface,
+                      ),
                     ),
                   ],
                 ],
@@ -1181,9 +1205,7 @@ class _ImportProgressDialog extends StatelessWidget {
                     : () => unawaited(importer.cancelImport()),
                 icon: const Icon(Icons.stop_circle_outlined),
                 label: Text(
-                  importer.isCancellingImport
-                      ? 'Stopping...'
-                      : 'Stop import',
+                  importer.isCancellingImport ? 'Stopping...' : 'Stop import',
                 ),
               ),
             ],
@@ -1281,8 +1303,8 @@ class _ImportStatusCard extends StatelessWidget {
     final pendingLabel = pendingUri == null
         ? importer.pendingSharedUrl
         : pendingUri.host.isEmpty
-            ? importer.pendingSharedUrl
-            : pendingUri.host;
+        ? importer.pendingSharedUrl
+        : pendingUri.host;
 
     return Card(
       child: Padding(
@@ -1296,8 +1318,8 @@ class _ImportStatusCard extends StatelessWidget {
                   hasPendingSharedUrl
                       ? Icons.share_outlined
                       : importer.isImporting
-                          ? Icons.downloading_outlined
-                          : Icons.link,
+                      ? Icons.downloading_outlined
+                      : Icons.link,
                   color: colorScheme.primary,
                 ),
                 const SizedBox(width: 10),
@@ -1306,10 +1328,10 @@ class _ImportStatusCard extends StatelessWidget {
                     importer.isImporting
                         ? 'Importing web content'
                         : hasImportError && hasPendingSharedUrl
-                            ? 'Web import failed'
+                        ? 'Web import failed'
                         : hasPendingSharedUrl
-                            ? 'Shared web link ready'
-                            : 'Web import',
+                        ? 'Shared web link ready'
+                        : 'Web import',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -1326,9 +1348,9 @@ class _ImportStatusCard extends StatelessWidget {
               Text(
                 pendingLabel ?? importer.pendingSharedUrl!,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               if (importer.pendingSharedUrl != pendingLabel) ...[
                 const SizedBox(height: 4),
@@ -1337,8 +1359,8 @@ class _ImportStatusCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ],
@@ -1363,8 +1385,8 @@ class _ImportStatusCard extends StatelessWidget {
               Text(
                 'Only import text you own, are licensed to access, or that is in the public domain.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
             const SizedBox(height: 16),
@@ -1375,27 +1397,26 @@ class _ImportStatusCard extends StatelessWidget {
                     : () => unawaited(importer.cancelImport()),
                 icon: const Icon(Icons.stop_circle_outlined),
                 label: Text(
-                  importer.isCancellingImport
-                      ? 'Stopping...'
-                      : 'Stop import',
+                  importer.isCancellingImport ? 'Stopping...' : 'Stop import',
                 ),
               )
             else
               FilledButton.tonalIcon(
-                onPressed:
-                    hasPendingSharedUrl ? onStartPendingImport : onStartImport,
+                onPressed: hasPendingSharedUrl
+                    ? onStartPendingImport
+                    : onStartImport,
                 icon: Icon(
                   hasPendingSharedUrl
                       ? hasImportError
-                          ? Icons.refresh_rounded
-                          : Icons.play_circle_outline
+                            ? Icons.refresh_rounded
+                            : Icons.play_circle_outline
                       : Icons.add_link,
                 ),
                 label: Text(
                   hasPendingSharedUrl
                       ? hasImportError
-                          ? 'Try web import again'
-                          : 'Start web import'
+                            ? 'Try web import again'
+                            : 'Start web import'
                       : 'Paste or import web link',
                 ),
                 style: FilledButton.styleFrom(
@@ -1439,16 +1460,13 @@ class _ActiveNovelCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              novel.title,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            Text(novel.title, style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(
               '${novel.chapters.length} chapters • ${Uri.tryParse(novel.sourceUrl)?.host ?? novel.sourceUrl}',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurface,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: colorScheme.onSurface),
             ),
             if (chapter != null) ...[
               const SizedBox(height: 12),
@@ -1496,8 +1514,8 @@ class _ActiveNovelCard extends StatelessWidget {
                     style: actionStyle,
                     onPressed:
                         importer.activeChapterIndex < novel.chapters.length - 1
-                            ? onNextChapter
-                            : null,
+                        ? onNextChapter
+                        : null,
                     icon: const Icon(Icons.chevron_right),
                     label: const Text(
                       'Next',
@@ -1543,13 +1561,15 @@ class _NowReadingCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(
-                  'Now reading',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                Expanded(
+                  child: Text(
+                    'Now reading',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 FilledButton.tonalIcon(
                   onPressed: onOpenPopup,
                   icon: const Icon(Icons.open_in_full),
@@ -1561,18 +1581,18 @@ class _NowReadingCard extends StatelessWidget {
             Text(
               'Paragraph ${ttsService.currentParagraphIndex + 1}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             if (chapterLabel != null) ...[
               const SizedBox(height: 8),
               Text(
                 chapterText,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
             const SizedBox(height: 12),
@@ -1581,10 +1601,10 @@ class _NowReadingCard extends StatelessWidget {
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    height: 1.45,
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w500,
-                  ),
+                height: 1.45,
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w500,
+              ),
             ),
             if (ttsService.paragraphCount > 0) ...[
               const SizedBox(height: 14),

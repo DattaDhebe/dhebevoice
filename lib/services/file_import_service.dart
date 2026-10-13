@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:epub_pro/epub_pro.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -71,8 +71,9 @@ class FileImportService {
     }
 
     final file = result.files.single;
-    final fileName =
-        file.name.trim().isEmpty ? 'Imported file' : file.name.trim();
+    final fileName = file.name.trim().isEmpty
+        ? 'Imported file'
+        : file.name.trim();
     final extension = _fileExtension(fileName);
 
     switch (extension) {
@@ -81,14 +82,14 @@ class FileImportService {
         if (bytes == null || bytes.isEmpty) {
           return null;
         }
-        final book = _parsePdf(bytes, fileName);
+        final book = await compute(_parsePdfInBackground, (bytes, fileName));
         return ImportedReaderFile.pdf(name: fileName, book: book);
       case 'epub':
         final bytes = await _readBytes(file);
         if (bytes == null || bytes.isEmpty) {
           return null;
         }
-        final book = await _parseEpub(bytes, fileName);
+        final book = await compute(_parseEpubInBackground, (bytes, fileName));
         return ImportedReaderFile.epub(name: fileName, book: book);
       case 'txt':
       default:
@@ -107,6 +108,12 @@ class FileImportService {
     }
     return imported.text;
   }
+
+  static NovelBook _parsePdfInBackground((Uint8List, String) input) =>
+      FileImportService()._parsePdf(input.$1, input.$2);
+
+  static Future<NovelBook> _parseEpubInBackground((Uint8List, String) input) =>
+      FileImportService()._parseEpub(input.$1, input.$2);
 
   Future<String?> _readText(PlatformFile file) async {
     if (file.bytes != null) {
@@ -143,8 +150,8 @@ class FileImportService {
       final chapterTitle = rawTitle.isNotEmpty
           ? rawTitle
           : (inheritedTitle?.trim().isNotEmpty ?? false)
-              ? inheritedTitle!.trim()
-              : 'Chapter ${chapters.length + 1}';
+          ? inheritedTitle!.trim()
+          : 'Chapter ${chapters.length + 1}';
       final plainText = _extractPlainText(chapter.htmlContent);
 
       if (plainText.isNotEmpty) {
@@ -259,7 +266,9 @@ class FileImportService {
       return blocks.join('\n\n');
     }
 
-    return _normalizeText(document.body?.text ?? document.documentElement?.text);
+    return _normalizeText(
+      document.body?.text ?? document.documentElement?.text,
+    );
   }
 
   String _normalizeText(String? input) {

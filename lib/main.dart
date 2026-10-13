@@ -69,27 +69,50 @@ Future<void> _initializeRuntimeServices({
   required NovelImportController novelImportController,
   required AudioHandlerController audioHandlerController,
 }) async {
-  await _ensureAndroidPlaybackChannel();
-  unawaited(_ensureAndroidNotificationPermission());
-  await ttsService.initialize();
-  await novelImportController.initialize();
-  final audioHandler = await AudioService.init(
-    builder: () => ReaderAudioHandler(
+  await WidgetsBinding.instance.endOfFrame;
+  await Future.wait([
+    ttsService.initialize(),
+    novelImportController.initialize(),
+    _initializeAudioHandler(
       ttsService: ttsService,
       novelImportController: novelImportController,
+      audioHandlerController: audioHandlerController,
     ),
-    config: AudioServiceConfig(
-      androidNotificationChannelId: _playbackChannelId,
-      androidNotificationChannelName: 'DhebeVoice Playback',
-      androidNotificationChannelDescription:
-          'Playback controls for DhebeVoice reading sessions',
-      androidNotificationOngoing: false,
-      androidStopForegroundOnPause: false,
-    ),
-  );
-
-  audioHandlerController.attach(audioHandler);
+  ]);
 }
+
+Future<void> _initializeAudioHandler({
+  required TtsService ttsService,
+  required NovelImportController novelImportController,
+  required AudioHandlerController audioHandlerController,
+}) async {
+  try {
+    await _ensureAndroidPlaybackChannel();
+    unawaited(_ensureAndroidNotificationPermission());
+    final audioHandler = await AudioService.init(
+      builder: () => ReaderAudioHandler(
+        ttsService: ttsService,
+        novelImportController: novelImportController,
+      ),
+      config: AudioServiceConfig(
+        androidNotificationChannelId: _playbackChannelId,
+        androidNotificationChannelName: 'DhebeVoice Playback',
+        androidNotificationChannelDescription:
+            'Playback controls for DhebeVoice reading sessions',
+        androidNotificationOngoing: false,
+        androidStopForegroundOnPause: false,
+      ),
+    );
+
+    audioHandlerController.attach(audioHandler);
+  } catch (error) {
+    debugPrint('Audio service initialization failed: $error');
+    audioHandlerController.reportError(
+      'Playback controls could not start. Please close and reopen DhebeVoice.',
+    );
+  }
+}
+
 class TextReaderApp extends StatelessWidget {
   const TextReaderApp({
     super.key,
@@ -138,8 +161,9 @@ class TextReaderApp extends StatelessWidget {
 
 ThemeData _buildTheme({required Brightness brightness}) {
   final isDark = brightness == Brightness.dark;
-  final scaffoldColor =
-      isDark ? const Color(0xFF071019) : const Color(0xFFEAF1F8);
+  final scaffoldColor = isDark
+      ? const Color(0xFF071019)
+      : const Color(0xFFEAF1F8);
   final cardColor = isDark ? const Color(0xFF182430) : Colors.white;
   final inputFillColor = isDark ? const Color(0xFF1C2936) : Colors.white;
   final seedScheme = ColorScheme.fromSeed(
@@ -206,9 +230,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: inputFillColor,
-      hintStyle: TextStyle(
-        color: colorScheme.onSurfaceVariant,
-      ),
+      hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(24),
         borderSide: BorderSide.none,
@@ -223,10 +245,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(24),
-        borderSide: BorderSide(
-          color: colorScheme.primary,
-          width: 1.5,
-        ),
+        borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
       ),
       contentPadding: const EdgeInsets.all(20),
     ),
@@ -256,26 +275,26 @@ ThemeData _buildTheme({required Brightness brightness}) {
 }
 
 Future<void> _ensureAndroidPlaybackChannel() async {
-  if (defaultTargetPlatform != TargetPlatform.android) {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
     return;
   }
 
   try {
-    await _systemChannel.invokeMethod<void>(
-      'ensurePlaybackChannel',
-      <String, dynamic>{
-        'id': _playbackChannelId,
-        'name': 'DhebeVoice Playback',
-        'description': 'Playback controls for DhebeVoice reading sessions',
-      },
-    );
+    await _systemChannel
+        .invokeMethod<void>('ensurePlaybackChannel', <String, dynamic>{
+          'id': _playbackChannelId,
+          'name': 'DhebeVoice Playback',
+          'description': 'Playback controls for DhebeVoice reading sessions',
+        });
   } on PlatformException {
     // The audio_service plugin can still create its own fallback channel.
+  } on MissingPluginException {
+    // Some platforms do not implement the app-specific notification channel.
   }
 }
 
 Future<void> _ensureAndroidNotificationPermission() async {
-  if (defaultTargetPlatform != TargetPlatform.android) {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
     return;
   }
 
@@ -283,5 +302,7 @@ Future<void> _ensureAndroidNotificationPermission() async {
     await _systemChannel.invokeMethod<bool>('ensureNotificationPermission');
   } on PlatformException {
     // Playback can still continue even if the permission prompt fails.
+  } on MissingPluginException {
+    // Notification permission is only requested on supported Android hosts.
   }
 }
