@@ -2,6 +2,10 @@
 
 DhebeVoice is a Flutter-based Android text-to-speech reader for long-form reading. It helps users listen to pasted text, imported files, and readable web pages with chapter-aware playback, paragraph controls, and background media controls.
 
+## Project Direction
+
+This repository sits at the intersection of **accessible application development and speech AI** in my portfolio. It complements my model-training work in [tts_humanize](https://github.com/DattaDhebe/tts_humanize) and [personal-voice-tts](https://github.com/DattaDhebe/personal-voice-tts) by focusing on the user-facing reading experience.
+
 ## Highlights
 
 - Read aloud pasted text with Android TTS voices
@@ -68,11 +72,24 @@ This repository contains the active source for the DhebeVoice Android app packag
 - App name: `DhebeVoice`
 - Android package: `com.dhebe.dhebevoice`
 
+The Android app is in Google Play closed testing. The repository includes iOS targets, but the current validation and release workflow focus on Android. Some capabilities are still being developed.
+
 ## Local Development
+
+Install Flutter, then run:
 
 ```bash
 flutter pub get
 flutter run
+```
+
+For platform-specific setup, see the [Flutter documentation](https://docs.flutter.dev/get-started/install).
+
+Run checks:
+
+```bash
+flutter analyze
+flutter test
 ```
 
 Build a release bundle:
@@ -102,3 +119,11 @@ These are good GitHub "About" values for this repo:
 
 - Web import should only be used for content the user is authorized to access.
 - Android TTS behavior can vary by device ROM, voice engine, and battery/background restrictions.
+## Related projects
+
+- [Personal Voice TTS](https://github.com/DattaDhebe/personal-voice-tts) — training and inference workflow for personalized VITS models
+- [TTS Humanize](https://github.com/DattaDhebe/tts_humanize) — GPU-accelerated Coqui TTS experimentation
+
+## License
+
+See the repository for the current license and project configuration.
