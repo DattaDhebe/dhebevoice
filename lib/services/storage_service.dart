@@ -5,6 +5,7 @@ class StorageService {
   static const _languageKey = 'reader_language';
   static const _voiceNameKey = 'reader_voice_name';
   static const _voiceLocaleKey = 'reader_voice_locale';
+  static const _speechProviderKey = 'reader_speech_provider';
   static const _rateKey = 'reader_rate';
   static const _pitchKey = 'reader_pitch';
   static const _volumeKey = 'reader_volume';
@@ -26,6 +27,28 @@ class StorageService {
   String? get language => _prefs.getString(_languageKey);
   String? get voiceName => _prefs.getString(_voiceNameKey);
   String? get voiceLocale => _prefs.getString(_voiceLocaleKey);
+  String get speechProvider =>
+      _prefs.getString(_speechProviderKey) ?? 'android';
+  Future<void> saveSpeechProvider(String value) =>
+      _prefs.setString(_speechProviderKey, value);
+  Future<void> saveProviderVoice(
+    String provider,
+    String? name,
+    String? locale,
+  ) async {
+    if (name == null || locale == null) return;
+    await _prefs.setString('voice_${provider}_name', name);
+    await _prefs.setString('voice_${provider}_locale', locale);
+  }
+
+  String? providerVoiceName(String provider) =>
+      _prefs.getString('voice_${provider}_name');
+  String? providerVoiceLocale(String provider) =>
+      _prefs.getString('voice_${provider}_locale');
+  bool isOnlineVoiceApproved(String name, String locale) =>
+      _prefs.getString('approved_online_voice') == '$locale|$name';
+  Future<void> approveOnlineVoice(String name, String locale) =>
+      _prefs.setString('approved_online_voice', '$locale|$name');
   double get rate => _prefs.getDouble(_rateKey) ?? 0.48;
   double get pitch => _prefs.getDouble(_pitchKey) ?? 1.0;
   double get volume => _prefs.getDouble(_volumeKey) ?? 1.0;
@@ -38,6 +61,12 @@ class StorageService {
   bool get hasSeededSampleBook => _prefs.getBool(_sampleBookSeededKey) ?? false;
 
   int? chapterIndexForNovel(String id) => _prefs.getInt('reader_chapter_$id');
+
+  int positionForChapter(String id, String chapter) =>
+      _prefs.getInt('reader_position_${id}_$chapter') ?? 0;
+
+  Future<void> saveChapterPosition(String id, String chapter, int position) =>
+      _prefs.setInt('reader_position_${id}_$chapter', position);
 
   Future<void> saveNovelChapterIndex(String id, int index) =>
       _prefs.setInt('reader_chapter_$id', index);
@@ -71,6 +100,7 @@ class StorageService {
       _prefs.setBool(_sampleBookSeededKey, value);
 
   Future<void> resetTtsSettings() async {
+    await _prefs.remove('approved_online_voice');
     await _prefs.remove(_languageKey);
     await _prefs.remove(_voiceNameKey);
     await _prefs.remove(_voiceLocaleKey);

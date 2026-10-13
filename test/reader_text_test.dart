@@ -2,6 +2,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:text_reader_app/models/reader_text.dart';
 
 void main() {
+  test('neural-sized chunks preserve text offsets and surrogate pairs', () {
+    final source = '${'Story sentence. ' * 100}\n\n${'x' * 239}\u{1F600}end';
+    final chunks = ReaderText(
+      source,
+    ).chunks(startOffset: 0, maxChunkLength: 240);
+    for (final chunk in chunks) {
+      expect(chunk.text.length, lessThanOrEqualTo(240));
+      expect(source.substring(chunk.start, chunk.end), chunk.text);
+      expect(chunk.text.runes, isNot(contains(0xFFFD)));
+    }
+    expect(chunks.last.text, '\u{1F600}end');
+  });
+
   test('paragraph offsets preserve spaces, CRLF and variable separators', () {
     const source = '  First paragraph.  \r\n\r\n\r\n  Second.\n \n\tThird. ';
     final reader = ReaderText(source);

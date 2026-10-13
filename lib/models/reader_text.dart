@@ -47,8 +47,12 @@ class ReaderText {
     return low;
   }
 
-  List<SpeechChunk> chunks({required int startOffset, int? endOffset}) {
-    const maxChunkLength = 2800;
+  List<SpeechChunk> chunks({
+    required int startOffset,
+    int? endOffset,
+    int maxChunkLength = 2800,
+  }) {
+    if (maxChunkLength < 2) throw ArgumentError.value(maxChunkLength);
     final result = <SpeechChunk>[];
     final limit = (endOffset ?? source.length).clamp(0, source.length);
     for (

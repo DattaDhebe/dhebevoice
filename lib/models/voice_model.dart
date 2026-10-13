@@ -5,6 +5,9 @@ class VoiceModel {
     required this.label,
     this.personaLabel,
     this.metadataLabels = const [],
+    this.qualityScore,
+    this.requiresNetwork,
+    this.isInstalled = true,
   });
 
   final String name;
@@ -12,6 +15,9 @@ class VoiceModel {
   final String label;
   final String? personaLabel;
   final List<String> metadataLabels;
+  final int? qualityScore;
+  final bool? requiresNetwork;
+  final bool isInstalled;
 
   String get selectionLabel {
     if (metadataLabels.isEmpty) {
@@ -21,11 +27,7 @@ class VoiceModel {
   }
 
   String get detailsLabel {
-    final details = [
-      ?personaLabel,
-      if (locale.isNotEmpty) locale,
-      name,
-    ];
+    final details = [?personaLabel, if (locale.isNotEmpty) locale, name];
     return details.join(' • ');
   }
 
@@ -55,13 +57,13 @@ class VoiceModel {
       label: label,
       personaLabel: personaLabel,
       metadataLabels: metadataLabels,
+      qualityScore: _qualityScore(map['quality']),
+      requiresNetwork: _networkRequirement(map),
+      isInstalled: !'${map['features']}'.contains('notInstalled'),
     );
   }
 
-  Map<String, String> toTtsMap() => {
-        'name': name,
-        'locale': locale,
-      };
+  Map<String, String> toTtsMap() => {'name': name, 'locale': locale};
 
   bool matchesIdentity(String? voiceName, String? voiceLocale) {
     return name == voiceName && locale == (voiceLocale ?? locale);
@@ -103,21 +105,45 @@ class VoiceModel {
 
   static List<String> _extractMetadataLabels(Map<String, dynamic> map) {
     final labels = <String>{};
-    final quality = _normalizeMetadataValue(map['quality']);
-    final latency = _normalizeMetadataValue(map['latency']);
+    final numericQuality = _qualityScore(map['quality']);
+    final quality = numericQuality == null
+        ? _normalizeMetadataValue(map['quality'])
+        : numericQuality >= 400
+        ? 'High quality'
+        : numericQuality >= 300
+        ? 'Normal quality'
+        : 'Basic quality';
     final engine = _normalizeMetadataValue(map['engine']);
 
     if (quality != null) {
       labels.add(quality);
     }
-    if (latency != null) {
-      labels.add(latency);
-    }
+    final network = _networkRequirement(map);
+    if (network != null) labels.add(network ? 'Requires internet' : 'Offline');
     if (engine != null) {
       labels.add(engine);
     }
 
     return labels.toList();
+  }
+
+  static bool? _networkRequirement(Map<String, dynamic> map) {
+    final raw = map['network_required'] ?? map['networkRequired'];
+    if (raw == true || raw == 'true' || raw == 1 || raw == '1') return true;
+    if (raw == false || raw == 'false' || raw == 0 || raw == '0') return false;
+    return null;
+  }
+
+  static int? _qualityScore(dynamic value) {
+    final text = value?.toString().trim().toLowerCase();
+    return int.tryParse(text ?? '') ??
+        const {
+          'very high': 500,
+          'high': 400,
+          'normal': 300,
+          'low': 200,
+          'very low': 100,
+        }[text];
   }
 
   static String? _normalizePersonaValue(String? raw) {

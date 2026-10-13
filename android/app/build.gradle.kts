@@ -64,3 +64,16 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.24.3")
+}
+
+// Older Android Studio JBRs bundle a Windows C++ runtime incompatible with ONNX.
+// A newer local Java executable can be used for JVM tests without changing the Android build JDK.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    System.getenv("DHEBEVOICE_TEST_JAVA")?.let { executable = it }
+}

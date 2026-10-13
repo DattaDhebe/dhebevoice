@@ -37,7 +37,24 @@ class NovelLibraryService {
   static List<NovelBook> _decodeLibrary(String raw) {
     final decoded = jsonDecode(raw);
     if (decoded is! List<dynamic>) {
-      return const [];
+      throw const FormatException('The saved Book List is not a list.');
+    }
+    if (decoded.any(
+      (entry) =>
+          entry is! Map<String, dynamic> ||
+          entry['id'] is! String ||
+          entry['chapters'] is! List ||
+          (entry['chapters'] as List).any(
+            (chapter) =>
+                chapter is! Map<String, dynamic> ||
+                chapter['content'] is! String ||
+                chapter['title'] is! String ||
+                chapter['url'] is! String,
+          ),
+    )) {
+      throw const FormatException(
+        'The saved Book List contains an invalid book.',
+      );
     }
 
     return decoded
@@ -62,6 +79,7 @@ class NovelLibraryService {
 
   Future<void> _writeLibrary(List<NovelBook> books) async {
     final file = await _libraryFile();
+    await file.parent.create(recursive: true);
     final payload = await compute(_encodeLibrary, books);
     final temporary = File('${file.path}.tmp');
     await temporary.writeAsString(payload, flush: true);

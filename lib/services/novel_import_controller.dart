@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../models/import_cancellation.dart';
 import '../models/novel_book.dart';
 import 'file_import_service.dart';
 import 'novel_library_service.dart';
@@ -40,6 +41,22 @@ class NovelImportController extends ChangeNotifier {
   String? _pendingSharedUrl;
   int _chapterActivationId = 0;
   Future<void>? _initialization;
+  bool _libraryReady = false;
+  bool _disposed = false;
+  ImportCancellation? _cancellation;
+  Future<void> _libraryMutation = Future<void>.value();
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _cancellation?.cancel();
+    super.dispose();
+  }
 
   List<NovelBook> get library => _library;
   NovelBook? get activeNovel => _activeNovel;
@@ -94,10 +111,12 @@ class NovelImportController extends ChangeNotifier {
         )
         .toList();
     if (_library.isEmpty && !_storageService.hasSeededSampleBook) {
-      _library = [_buildSampleBook()];
-      await _novelLibraryService.saveLibrary(_library);
+      final initial = [_buildSampleBook()];
+      await _novelLibraryService.saveLibrary(initial);
+      _library = initial;
       await _storageService.saveHasSeededSampleBook(true);
     }
+    _libraryReady = true;
     _selectedWebAccessModeId = WebNovelImportService.normalizeAccessModeId(
       _storageService.webAccessModeId,
     );
@@ -128,8 +147,9 @@ class NovelImportController extends ChangeNotifier {
       return;
     }
 
-    if (_looksLikeUrl(trimmed)) {
-      await queueSharedUrl(trimmed);
+    final sharedLink = _sharedLink(trimmed);
+    if (sharedLink != null) {
+      await queueSharedUrl(sharedLink);
       return;
     }
 
@@ -139,9 +159,11 @@ class NovelImportController extends ChangeNotifier {
 
   Future<void> queueSharedUrl(String url) async {
     _pendingSharedUrl = url.trim();
-    _errorMessage = null;
-    _importProgress = null;
-    _importStatus = 'Shared link ready. Review it, then start import.';
+    if (!_isImporting) {
+      _errorMessage = null;
+      _importProgress = null;
+      _importStatus = 'Shared link ready. Review it, then start import.';
+    }
     notifyListeners();
   }
 
@@ -180,19 +202,34 @@ class NovelImportController extends ChangeNotifier {
 
   Future<void> importLocalFile() async {
     await initialize();
-    if (_isImporting) return;
+    if (_isImporting || !_libraryReady || _disposed) return;
+    _isImporting = true;
+    _isCancellingImport = false;
+    final activation = _chapterActivationId;
+    final originalText = _ttsService.text;
     _errorMessage = null;
-    _importStatus = null;
+    _importStatus = 'Choose a TXT, EPUB or PDF file...';
     notifyListeners();
 
     try {
       final imported = await _fileImportService.importReaderFile();
+      if (_isCancellingImport || _disposed) {
+        _importStatus = 'Import stopped.';
+        return;
+      }
       if (imported == null) {
+        _importStatus = null;
         return;
       }
 
       switch (imported.kind) {
         case ImportedReaderFileKind.text:
+          if (activation != _chapterActivationId ||
+              originalText != _ttsService.text) {
+            _importStatus =
+                'Reader changed while choosing a file. Import the text file again when ready.';
+            return;
+          }
           await clearActiveNovel();
           await _ttsService.stop();
           await _ttsService.updateText(imported.text!, resetPosition: true);
@@ -201,48 +238,62 @@ class NovelImportController extends ChangeNotifier {
         case ImportedReaderFileKind.epub:
         case ImportedReaderFileKind.pdf:
           final book = imported.book!;
-          final updated = [..._library];
-          final existingIndex = updated.indexWhere(
-            (entry) => entry.sourceUrl == book.sourceUrl,
-          );
-          if (existingIndex >= 0) {
-            updated[existingIndex] = book;
-          } else {
-            updated.insert(0, book);
+          final saved = await _saveImportedBook(book);
+          if (!_disposed &&
+              !_isCancellingImport &&
+              activation == _chapterActivationId &&
+              originalText == _ttsService.text &&
+              !_ttsService.isPlaying &&
+              _activeNovel == null &&
+              originalText.trim().isEmpty) {
+            await selectNovel(saved.id);
           }
-
-          _library = updated;
-          await _novelLibraryService.saveLibrary(updated);
-          await selectNovel(book.id, chapterIndex: 0);
           final importType = switch (imported.kind) {
             ImportedReaderFileKind.epub => 'EPUB',
             ImportedReaderFileKind.pdf => 'PDF',
             ImportedReaderFileKind.text => 'text',
           };
-          _importStatus =
-              'Imported $importType ${book.title} with ${book.chapters.length} sections.';
+          _importStatus = _isCancellingImport
+              ? 'Import stopped. Completed content was saved to Book List.'
+              : 'Imported $importType ${book.title} with ${book.chapters.length} sections.';
           break;
       }
     } catch (error) {
-      _errorMessage = error.toString().replaceFirst('Exception: ', '');
+      _importStatus = _isCancellingImport
+          ? 'Import stopped.'
+          : 'Could not import that file.';
+      if (!_isCancellingImport) _errorMessage = _friendlyImportError(error);
     } finally {
+      _isImporting = false;
+      _isCancellingImport = false;
       notifyListeners();
     }
   }
 
-  bool _looksLikeUrl(String value) {
-    final uri = Uri.tryParse(value);
-    if (uri == null) {
-      return false;
+  String? _sharedLink(String value) {
+    // Browsers often share a title followed by the URL on a separate line.
+    final matches = RegExp(
+      r'https?://[^\s<>]+',
+      caseSensitive: false,
+    ).allMatches(value).toList();
+    if (matches.length != 1) return null;
+    try {
+      return WebNovelImportService.normalizeUri(
+        matches.single.group(0)!,
+      ).toString();
+    } on FormatException {
+      return null;
     }
-    return (uri.hasScheme && uri.host.isNotEmpty) ||
-        (!uri.hasScheme && uri.host.isNotEmpty);
   }
 
   Future<void> importNovelFromUrl(String url, {String? accessModeId}) async {
     await initialize();
-    if (_isImporting) return;
+    if (_isImporting || !_libraryReady || _disposed) return;
     _isImporting = true;
+    final cancellation = ImportCancellation();
+    _cancellation = cancellation;
+    final activation = _chapterActivationId;
+    final originalText = _ttsService.text;
     final resolvedAccessModeId = WebNovelImportService.normalizeAccessModeId(
       accessModeId ?? _selectedWebAccessModeId,
     );
@@ -260,39 +311,49 @@ class NovelImportController extends ChangeNotifier {
         url,
         accessModeId: resolvedAccessModeId,
         onProgress: (current, total, status) {
+          if (_isCancellingImport || _disposed) return;
           _importStatus = status;
           _importProgress = total == null || total == 0
               ? null
-              : current / total;
+              : (current / total).clamp(0.0, 1.0);
           notifyListeners();
         },
         shouldCancel: () => _isCancellingImport,
+        cancellation: cancellation,
       );
 
       final imported = result.book;
-      final shouldAutoSelectImported = imported != null && !result.wasCancelled;
+      final shouldAutoSelectImported =
+          imported != null &&
+          !result.wasCancelled &&
+          result.warning == null &&
+          !_disposed &&
+          activation == _chapterActivationId &&
+          originalText == _ttsService.text &&
+          !_ttsService.isPlaying &&
+          _activeNovel == null &&
+          originalText.trim().isEmpty;
 
       if (imported != null) {
-        final updated = [..._library];
-        final existingIndex = updated.indexWhere(
-          (book) => book.sourceUrl == imported.sourceUrl,
-        );
-        if (existingIndex >= 0) {
-          updated[existingIndex] = imported;
-        } else {
-          updated.insert(0, imported);
-        }
-        _library = updated;
-        await _novelLibraryService.saveLibrary(updated);
-        if (shouldAutoSelectImported) {
-          await selectNovel(imported.id, chapterIndex: 0);
+        final saved = await _saveImportedBook(imported);
+        if (shouldAutoSelectImported &&
+            !_disposed &&
+            !cancellation.isCancelled &&
+            activation == _chapterActivationId &&
+            !_ttsService.isPlaying) {
+          await selectNovel(saved.id);
         }
       }
 
-      if (result.wasCancelled) {
+      if (result.wasCancelled || cancellation.isCancelled) {
         _importStatus = imported == null
             ? 'Import stopped.'
-            : 'Stopped after ${imported.chapters.length} chapters. Saved to Books List.';
+            : 'Stopped after ${imported.chapters.length} chapters. Saved to Book List.';
+      } else if (result.warning != null) {
+        _importStatus =
+            'Saved ${imported?.chapters.length ?? 0} chapters. Import incomplete.';
+        _errorMessage = result.warning;
+        _pendingSharedUrl ??= url;
       } else if (imported != null) {
         _importStatus = 'Imported ${imported.chapters.length} chapters.';
         completedWithoutCancellation = true;
@@ -300,12 +361,14 @@ class NovelImportController extends ChangeNotifier {
     } catch (error) {
       _importStatus = 'Could not import that web page.';
       _errorMessage = _friendlyImportError(error);
+      _pendingSharedUrl ??= url;
     } finally {
       if (completedWithoutCancellation &&
           _pendingSharedUrl?.trim() == url.trim()) {
         _pendingSharedUrl = null;
       }
       _isImporting = false;
+      _cancellation = null;
       _isCancellingImport = false;
       _importProgress = null;
       notifyListeners();
@@ -318,12 +381,16 @@ class NovelImportController extends ChangeNotifier {
     }
 
     _isCancellingImport = true;
-    _importStatus = 'Stopping import after the current chapter...';
+    _cancellation?.cancel();
+    _importStatus = 'Stopping import. Completed chapters will be kept.';
     notifyListeners();
   }
 
   String _friendlyImportError(Object error) {
-    final raw = error.toString().replaceFirst('Exception: ', '').trim();
+    final raw = error
+        .toString()
+        .replaceFirst(RegExp(r'^(Exception|FormatException): '), '')
+        .trim();
     if (raw.isEmpty) {
       return 'Something went wrong while importing that web page. Please try again.';
     }
@@ -344,7 +411,7 @@ class NovelImportController extends ChangeNotifier {
     await _activateChapter(
       novel: novel,
       chapterIndex: resolvedChapterIndex,
-      persistLastRead: false,
+      persistLastRead: true,
     );
   }
 
@@ -365,6 +432,7 @@ class NovelImportController extends ChangeNotifier {
 
   Future<void> clearActiveNovel() async {
     _chapterActivationId++;
+    await _saveReadingPosition();
     _activeNovel = null;
     _activeChapterIndex = 0;
     await _storageService.saveActiveNovelId(null);
@@ -373,8 +441,11 @@ class NovelImportController extends ChangeNotifier {
   }
 
   Future<void> deleteNovel(String novelId) async {
-    _library = _library.where((book) => book.id != novelId).toList();
-    await _novelLibraryService.saveLibrary(_library);
+    await _mutateLibrary(() async {
+      final updated = _library.where((book) => book.id != novelId).toList();
+      await _novelLibraryService.saveLibrary(updated);
+      _library = updated;
+    });
 
     if (_activeNovel?.id == novelId) {
       await clearActiveNovel();
@@ -428,6 +499,7 @@ class NovelImportController extends ChangeNotifier {
   }
 
   Future<void> _handlePlaybackCompleted() async {
+    if (_disposed) return;
     final session = _ttsService.playbackSessionId;
     final novel = _activeNovel;
     if (novel == null) {
@@ -462,7 +534,13 @@ class NovelImportController extends ChangeNotifier {
     int? expectedPlaybackSession,
   }) async {
     final activation = ++_chapterActivationId;
-    bool isCurrent() => activation == _chapterActivationId;
+    bool isCurrent() => activation == _chapterActivationId && !_disposed;
+    await _saveReadingPosition();
+    if (!isCurrent()) return;
+    if (expectedPlaybackSession != null &&
+        expectedPlaybackSession != _ttsService.playbackSessionId) {
+      return;
+    }
     if (stopPlayback) await _ttsService.stop();
     if (!isCurrent()) return;
     if (expectedPlaybackSession != null &&
@@ -473,6 +551,12 @@ class NovelImportController extends ChangeNotifier {
     final textUpdate = _ttsService.updateText(
       novel.chapters[chapterIndex].content,
       resetPosition: true,
+      initialPosition: stopPlayback
+          ? _storageService.positionForChapter(
+              novel.id,
+              novel.chapters[chapterIndex].url,
+            )
+          : 0,
     );
     _activeNovel = novel;
     _activeChapterIndex = chapterIndex;
@@ -488,6 +572,137 @@ class NovelImportController extends ChangeNotifier {
       await _updateLastReadChapter(novel.id, chapterIndex);
     }
     if (!isCurrent()) return;
+    notifyListeners();
+  }
+
+  Future<void> _saveReadingPosition() async {
+    final novel = _activeNovel;
+    final chapter = activeChapter;
+    if (novel == null ||
+        chapter == null ||
+        chapter.content != _ttsService.text) {
+      return;
+    }
+    await _storageService.saveChapterPosition(
+      novel.id,
+      chapter.url,
+      _ttsService.currentCharIndex,
+    );
+  }
+
+  Future<void> _mutateLibrary(Future<void> Function() action) {
+    final next = _libraryMutation.then((_) => action());
+    _libraryMutation = next.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return next;
+  }
+
+  String _sourceKey(String source) {
+    if (!source.startsWith('http')) return source;
+    try {
+      return WebNovelImportService.normalizeUri(source).toString();
+    } on FormatException {
+      return source;
+    }
+  }
+
+  Future<NovelBook> _saveImportedBook(NovelBook imported) async {
+    var saved = imported;
+    await _mutateLibrary(() async {
+      final incomingUrls = imported.chapters
+          .map((c) => _sourceKey(c.url))
+          .toSet();
+      final existingIndex = _library.indexWhere(
+        (book) =>
+            _sourceKey(book.sourceUrl) == _sourceKey(imported.sourceUrl) ||
+            book.chapters.any((c) => incomingUrls.contains(_sourceKey(c.url))),
+      );
+      final updated = [..._library];
+      if (existingIndex >= 0) {
+        final existing = updated[existingIndex];
+        final chapters = <String, NovelChapter>{
+          for (final chapter in existing.chapters)
+            _sourceKey(chapter.url): chapter,
+        };
+        // Keep saved content so retrying does not invalidate reading offsets.
+        for (final chapter in imported.chapters) {
+          chapters.putIfAbsent(_sourceKey(chapter.url), () => chapter);
+        }
+        final merged = chapters.values.toList();
+        int? number(NovelChapter c) => int.tryParse(
+          RegExp(
+                r'(?:chapter|episode|part)[\s_-]*(\d+)',
+                caseSensitive: false,
+              ).firstMatch(c.title)?.group(1) ??
+              '',
+        );
+        if (merged.every((c) => number(c) != null)) {
+          merged.sort((a, b) => number(a)!.compareTo(number(b)!));
+        }
+        final lastUrl = existing.chapters.isEmpty
+            ? null
+            : existing
+                  .chapters[existing.lastReadChapterIndex.clamp(
+                    0,
+                    existing.chapters.length - 1,
+                  )]
+                  .url;
+        saved = existing.copyWith(
+          importedAt: imported.importedAt,
+          chapters: [
+            for (var i = 0; i < merged.length; i++)
+              NovelChapter(
+                title: merged[i].title,
+                url: merged[i].url,
+                content: merged[i].content,
+                order: i,
+              ),
+          ],
+          lastReadChapterIndex: merged
+              .indexWhere((c) => c.url == lastUrl)
+              .clamp(0, merged.length - 1),
+        );
+        updated[existingIndex] = saved;
+      } else {
+        updated.insert(0, saved);
+      }
+      await _novelLibraryService.saveLibrary(updated);
+      final activeUrl = activeChapter?.url;
+      // Chapter selection can change while the disk write is in flight.
+      _library = updated.map((book) {
+        final current = _library.where((b) => b.id == book.id).firstOrNull;
+        if (current == null || current.chapters.isEmpty) return book;
+        final url = current
+            .chapters[current.lastReadChapterIndex.clamp(
+              0,
+              current.chapters.length - 1,
+            )]
+            .url;
+        final index = book.chapters.indexWhere((c) => c.url == url);
+        return index < 0 ? book : book.copyWith(lastReadChapterIndex: index);
+      }).toList();
+      saved = _library.firstWhere((book) => book.id == saved.id);
+      if (_activeNovel?.id == saved.id) {
+        _activeNovel = saved;
+        _activeChapterIndex = saved.chapters
+            .indexWhere((c) => c.url == activeUrl)
+            .clamp(0, saved.chapters.length - 1);
+        await _storageService.saveActiveChapterIndex(_activeChapterIndex);
+      }
+      await _storageService.saveNovelChapterIndex(
+        saved.id,
+        saved.lastReadChapterIndex,
+      );
+    });
+    return saved;
+  }
+
+  void clearImportMessage() {
+    if (_isImporting) return;
+    _importStatus = null;
+    _errorMessage = null;
     notifyListeners();
   }
 

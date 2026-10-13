@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/theme_controller.dart';
 import '../services/tts_service.dart';
 import '../widgets/tts_settings_panel.dart';
+import '../widgets/offline_voice_panel.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -114,6 +115,10 @@ class SettingsScreen extends StatelessWidget {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 10),
+                      const Text(
+                        'Offline neural voices process reading text on this device. Optional model downloads contact Hugging Face. Online Android voices may send reading text to your chosen TTS provider. DhebeVoice uses no paid cloud TTS API.',
+                      ),
+                      const SizedBox(height: 10),
                       Text(
                         'Before publishing on Google Play, add a public privacy policy URL in Play Console and complete the Data safety form with your real data practices.',
                         style: Theme.of(context).textTheme.bodyMedium,
@@ -123,7 +128,19 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
+              if (ttsService.supportsOfflineVoice) ...[
+                OfflineVoicePanel(service: ttsService),
+                const SizedBox(height: 16),
+              ],
               TtsSettingsPanel(
+                key: ValueKey(ttsService.usesOfflineVoice),
+                pitchEnabled: !ttsService.usesOfflineVoice,
+                onRefreshVoices: ttsService.usesOfflineVoice
+                    ? null
+                    : ttsService.refreshVoices,
+                onBestVoice: ttsService.usesOfflineVoice
+                    ? null
+                    : ttsService.selectBestInstalledVoice,
                 languages: ttsService.availableLanguages(),
                 selectedLanguage: ttsService.selectedLanguage,
                 selectedVoice: ttsService.selectedVoice,
@@ -137,10 +154,18 @@ class SettingsScreen extends StatelessWidget {
                     ttsService.setLanguage(value);
                   }
                 },
-                onVoiceSelected: ttsService.setVoice,
+                onVoiceSelected: (voice) =>
+                    ttsService.setVoice(voice, confirmOnline: true),
                 onRateChanged: ttsService.setSpeechRate,
                 onPitchChanged: ttsService.setPitch,
                 onVolumeChanged: ttsService.setVolume,
+              ),
+              TextButton(
+                onPressed: () => showLicensePage(
+                  context: context,
+                  applicationName: 'DhebeVoice',
+                ),
+                child: const Text('Open-source and voice model licenses'),
               ),
             ],
           ),

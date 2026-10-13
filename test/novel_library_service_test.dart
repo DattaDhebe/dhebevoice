@@ -30,6 +30,22 @@ void main() {
     expect(await library.loadLibrary(), isEmpty);
   });
 
+  test(
+    'invalid JSON structure is not silently treated as an empty library',
+    () async {
+      final file = File('${directory.path}/novel_library.json');
+      for (final content in [
+        '{}',
+        '[42]',
+        '[{"id":"book","chapters":"broken"}]',
+      ]) {
+        await file.writeAsString(content);
+        await expectLater(library.loadLibrary(), throwsFormatException);
+        expect(await file.readAsString(), content);
+      }
+    },
+  );
+
   test('overlapping saves finish in order without truncating JSON', () async {
     final first = library.saveLibrary([book('first')]);
     final last = library.saveLibrary([book('last')]);

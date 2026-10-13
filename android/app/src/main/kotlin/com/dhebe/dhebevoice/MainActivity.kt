@@ -17,6 +17,9 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        if (!flutterEngine.plugins.has(OfflineTtsPlugin::class.java)) {
+            flutterEngine.plugins.add(OfflineTtsPlugin())
+        }
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,

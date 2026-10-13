@@ -66,3 +66,6 @@ app.*.map.json
 /android/key.properties
 /android/*.jks
 /android/*.keystore
+
+# Local publishing credentials (never commit)
+/android/app/secret/

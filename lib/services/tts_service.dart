@@ -9,7 +9,10 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../models/voice_model.dart';
 import '../models/reader_text.dart';
+import '../models/offline_voice_pack.dart';
 import 'file_import_service.dart';
+import 'offline_model_store.dart';
+import 'offline_speech_engine.dart';
 import 'storage_service.dart';
 
 enum ReaderPlaybackState { idle, playing, paused, stopped, completed, error }
@@ -29,13 +32,25 @@ class TtsService extends ChangeNotifier {
     required StorageService storageService,
     required FileImportService fileImportService,
     FlutterTts? flutterTts,
+    OfflineModelStore? modelStore,
+    OfflineSpeechEngine? offlineEngine,
   }) : _storageService = storageService,
        _fileImportService = fileImportService,
-       _flutterTts = flutterTts ?? FlutterTts();
+       _flutterTts = flutterTts ?? FlutterTts(),
+       modelStore = modelStore ?? OfflineModelStore(),
+       _offlineEngine = offlineEngine;
 
   final StorageService _storageService;
   final FileImportService _fileImportService;
   final FlutterTts _flutterTts;
+  final OfflineModelStore modelStore;
+  OfflineSpeechEngine? _offlineEngine;
+  bool _useOfflineVoice = false;
+  bool _switchingVoice = false;
+  bool get usesOfflineVoice => _useOfflineVoice;
+  bool get switchingVoice => _switchingVoice;
+  bool get supportsOfflineVoice =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   AudioSession? _audioSession;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSubscription;
   StreamSubscription<void>? _becomingNoisySubscription;
@@ -131,6 +146,12 @@ class TtsService extends ChangeNotifier {
       await _applyStoredSelections();
       await _syncTtsOptions();
 
+      if (supportsOfflineVoice &&
+          _storageService.speechProvider == OfflineVoicePack.id) {
+        await modelStore.initialize();
+        if (modelStore.ready) await setOfflineVoiceEnabled(true);
+      }
+
       if (_text.isNotEmpty) {
         _currentParagraphIndex = _paragraphIndexForOffset(_currentCharIndex);
       }
@@ -152,6 +173,7 @@ class TtsService extends ChangeNotifier {
       await _flutterTts.setQueueMode(0);
 
       _flutterTts.setStartHandler(() {
+        if (_useOfflineVoice) return;
         if (!isPlaying || _queuedChunks.isEmpty || _isDisposed) return;
         _chunkStarted = true;
         _markPlaybackActivity();
@@ -160,6 +182,7 @@ class TtsService extends ChangeNotifier {
       });
 
       _flutterTts.setCompletionHandler(() {
+        if (_useOfflineVoice) return;
         if (!_chunkStarted || !isPlaying || _isDisposed) return;
         _chunkStarted = false;
         _markPlaybackActivity(resetRecoveryAttempts: true);
@@ -167,6 +190,7 @@ class TtsService extends ChangeNotifier {
       });
 
       _flutterTts.setPauseHandler(() {
+        if (_useOfflineVoice) return;
         if (_isDisposed || !isPlaying || _queuedChunks.isEmpty) return;
         final pauseOrigin = _pauseOrigin;
         _pauseOrigin = _PauseOrigin.none;
@@ -179,6 +203,7 @@ class TtsService extends ChangeNotifier {
       });
 
       _flutterTts.setContinueHandler(() {
+        if (_useOfflineVoice) return;
         if (!isPlaying || _queuedChunks.isEmpty || _isDisposed) return;
         _chunkStarted = true;
         _cancelUnexpectedPauseRecovery();
@@ -190,10 +215,12 @@ class TtsService extends ChangeNotifier {
       });
 
       _flutterTts.setErrorHandler((message) {
+        if (_useOfflineVoice) return;
         unawaited(_handlePlaybackError(message));
       });
 
       _flutterTts.setProgressHandler((text, start, end, word) {
+        if (_useOfflineVoice) return;
         if (!isPlaying || _queuedChunks.isEmpty || _isDisposed) return;
         final activeChunk = _queuedChunks[_queuedChunkIndex];
         if (text != activeChunk.text) return;
@@ -292,17 +319,181 @@ class TtsService extends ChangeNotifier {
                   entry.map((key, value) => MapEntry(key.toString(), value)),
             )
             .map(VoiceModel.fromMap)
-            .where((voice) => voice.locale.isNotEmpty)
+            .where((voice) => voice.locale.isNotEmpty && voice.isInstalled)
             .toList()
           ..sort((a, b) => a.label.compareTo(b.label));
 
     _voices = voiceMaps;
   }
 
+  Future<void> refreshVoices() async {
+    if (_useOfflineVoice || _switchingVoice || _isInitializing) return;
+    try {
+      final previous = _selectedVoice;
+      await _loadVoices();
+      _selectedVoice =
+          _voices
+              .where((v) => v.matchesIdentity(previous?.name, previous?.locale))
+              .firstOrNull ??
+          _defaultVoiceForLanguage(_selectedLanguage);
+      if (_selectedVoice != null) _selectedLanguage = _selectedVoice!.locale;
+      _errorMessage = null;
+    } catch (_) {
+      _errorMessage =
+          'Could not refresh Android voices. Check your system TTS settings.';
+    }
+    notifyListeners();
+  }
+
+  Future<void> selectBestInstalledVoice() async {
+    if (_useOfflineVoice) return;
+    final candidates = _voices
+        .where(
+          (v) =>
+              v.requiresNetwork != true &&
+              _normalizeLocale(v.locale) == _normalizeLocale(_selectedLanguage),
+        )
+        .toList();
+    candidates.sort((a, b) {
+      final availability = (a.requiresNetwork == false ? 0 : 1).compareTo(
+        b.requiresNetwork == false ? 0 : 1,
+      );
+      return availability != 0
+          ? availability
+          : (b.qualityScore ?? 0).compareTo(a.qualityScore ?? 0);
+    });
+    if (candidates.isNotEmpty) {
+      await setVoice(candidates.first);
+    } else {
+      _errorMessage =
+          'No offline voice was found for this language. You can choose an online voice explicitly from the voice list.';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _stopSpeech() async {
+    if (_useOfflineVoice) {
+      await _offlineEngine?.stop();
+    } else {
+      await _flutterTts.stop();
+    }
+  }
+
+  void _prepareOfflineCallbacks() {
+    _offlineEngine ??= OfflineSpeechEngine();
+    _offlineEngine!.onStart = () {
+      if (!_useOfflineVoice ||
+          !isPlaying ||
+          _queuedChunks.isEmpty ||
+          _isDisposed) {
+        return;
+      }
+      _chunkStarted = true;
+      _markPlaybackActivity();
+      notifyListeners();
+    };
+    _offlineEngine!.onActivity = () {
+      if (_useOfflineVoice && isPlaying) {
+        _markPlaybackActivity(resetRecoveryAttempts: true);
+      }
+    };
+    _offlineEngine!.onComplete = () {
+      if (!_useOfflineVoice ||
+          !isPlaying ||
+          _queuedChunks.isEmpty ||
+          _isDisposed) {
+        return;
+      }
+      _chunkStarted = false;
+      unawaited(_handleChunkCompleted());
+    };
+    _offlineEngine!.onError = (error) {
+      if (_useOfflineVoice) unawaited(_handlePlaybackError(error));
+    };
+  }
+
+  Future<void> setOfflineVoiceEnabled(bool enabled) async {
+    if (_switchingVoice || enabled == _useOfflineVoice) return;
+    if (enabled && (!supportsOfflineVoice || !modelStore.ready)) return;
+    _switchingVoice = true;
+    notifyListeners();
+    final previousProvider = _useOfflineVoice ? OfflineVoicePack.id : 'android';
+    try {
+      if (isPlaying) await pause();
+      await _storageService.saveProviderVoice(
+        previousProvider,
+        _selectedVoice?.name,
+        _selectedVoice?.locale,
+      );
+      await _stopSpeech();
+      ++_sessionId;
+      _queuedChunks = const [];
+      _queuedEndOffset = null;
+      _useOfflineVoice = enabled;
+      if (enabled) {
+        _prepareOfflineCallbacks();
+        _voices = [
+          for (final locale in OfflineVoicePack.languages)
+            for (final gender in ['F', 'M'])
+              for (var i = 1; i <= 5; i++)
+                VoiceModel(
+                  name: '$gender$i',
+                  locale: locale,
+                  label: 'Supertonic ${gender == 'F' ? 'Female' : 'Male'} $i',
+                  personaLabel: gender == 'F' ? 'Female' : 'Male',
+                  metadataLabels: const ['Offline', 'Neural'],
+                  requiresNetwork: false,
+                ),
+        ];
+      } else {
+        await _offlineEngine?.unload();
+        await _loadVoices();
+      }
+      final provider = enabled ? OfflineVoicePack.id : 'android';
+      final name = _storageService.providerVoiceName(provider);
+      final locale = _storageService.providerVoiceLocale(provider);
+      _selectedVoice =
+          _voices.where((v) => v.matchesIdentity(name, locale)).firstOrNull ??
+          (enabled
+              ? _voices.first
+              : _defaultVoiceForLanguage(_defaultLanguage));
+      _selectedLanguage = _selectedVoice?.locale ?? _defaultLanguage;
+      await _storageService.saveSpeechProvider(provider);
+      await _storageService.saveVoice(
+        _selectedVoice?.name,
+        _selectedVoice?.locale,
+      );
+      await _storageService.saveLanguage(_selectedLanguage);
+      await _syncTtsOptions();
+      _errorMessage = null;
+    } catch (_) {
+      _errorMessage =
+          'Could not change speech engine. Try Android voices or restart the app.';
+    } finally {
+      _switchingVoice = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> removeOfflineVoicePack() async {
+    if (modelStore.downloading) return;
+    if (_useOfflineVoice) await setOfflineVoiceEnabled(false);
+    await _offlineEngine?.unload();
+    await modelStore.remove();
+  }
+
   Future<void> _applyStoredSelections() async {
-    final storedLanguage = _storageService.language;
-    final storedVoiceName = _storageService.voiceName;
-    final storedVoiceLocale = _storageService.voiceLocale;
+    final restoringOffline =
+        _storageService.speechProvider == OfflineVoicePack.id;
+    final storedLanguage = restoringOffline
+        ? _storageService.providerVoiceLocale('android')
+        : _storageService.language;
+    final storedVoiceName = restoringOffline
+        ? _storageService.providerVoiceName('android')
+        : _storageService.voiceName;
+    final storedVoiceLocale = restoringOffline
+        ? _storageService.providerVoiceLocale('android')
+        : _storageService.voiceLocale;
     final defaultLanguage = _preferredLanguageFromVoices();
 
     _selectedLanguage = storedLanguage ?? defaultLanguage ?? _defaultLanguage;
@@ -384,7 +575,7 @@ class TtsService extends ChangeNotifier {
   int _voicePreferenceScore(VoiceModel voice, String normalizedLanguage) {
     final normalizedLocale = _normalizeLocale(voice.locale);
     final normalizedName = _normalizeVoiceName(voice.name);
-    var score = 0;
+    var score = voice.requiresNetwork == false ? 10000 : 0;
 
     if (normalizedLocale == normalizedLanguage) {
       score += 1000;
@@ -425,6 +616,7 @@ class TtsService extends ChangeNotifier {
   }
 
   Future<void> _syncTtsOptions() async {
+    if (_useOfflineVoice) return;
     if (!_engineReady) {
       return;
     }
@@ -439,13 +631,22 @@ class TtsService extends ChangeNotifier {
     }
   }
 
-  Future<void> updateText(String value, {bool resetPosition = false}) async {
-    if (value == _text && !resetPosition) return;
+  Future<void> updateText(
+    String value, {
+    bool resetPosition = false,
+    int? initialPosition,
+  }) async {
+    if (value == _text && !resetPosition && initialPosition == null) return;
     if (isPlaying || isPaused) await stop();
     _text = value;
     _readerText = ReaderText(value);
     _errorMessage = null;
-    if (resetPosition || _currentCharIndex > _text.length) {
+    if (initialPosition != null) {
+      _currentCharIndex = initialPosition.clamp(0, _text.length);
+      _currentParagraphIndex = _paragraphIndexForOffset(_currentCharIndex);
+      _activeChunkOffset = _currentCharIndex;
+      _pausedCharIndex = _currentCharIndex;
+    } else if (resetPosition || _currentCharIndex > _text.length) {
       _currentCharIndex = 0;
       _currentParagraphIndex = 0;
       _activeChunkOffset = 0;
@@ -481,11 +682,19 @@ class TtsService extends ChangeNotifier {
   }
 
   Future<void> setLanguage(String value) async {
+    if (_switchingVoice) return;
+    if (isPlaying || isPaused) await pause();
     _selectedLanguage = value;
     _selectedVoice = _defaultVoiceForLanguage(value);
+    if (_useOfflineVoice) await _offlineEngine?.stop();
     _errorMessage = null;
     await _storageService.saveLanguage(value);
     await _storageService.saveVoice(
+      _selectedVoice?.name,
+      _selectedVoice?.locale,
+    );
+    await _storageService.saveProviderVoice(
+      _useOfflineVoice ? OfflineVoicePack.id : 'android',
       _selectedVoice?.name,
       _selectedVoice?.locale,
     );
@@ -493,7 +702,23 @@ class TtsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setVoice(VoiceModel? voice) async {
+  Future<void> setVoice(VoiceModel? voice, {bool confirmOnline = false}) async {
+    if (_switchingVoice) return;
+    if (voice?.requiresNetwork == true) {
+      if (confirmOnline) {
+        await _storageService.approveOnlineVoice(voice!.name, voice.locale);
+      } else if (!_storageService.isOnlineVoiceApproved(
+        voice!.name,
+        voice.locale,
+      )) {
+        _errorMessage =
+            'Choose this online voice from Settings to confirm internet use first.';
+        notifyListeners();
+        return;
+      }
+    }
+    if (isPlaying || isPaused) await pause();
+    if (_useOfflineVoice) await _offlineEngine?.stop();
     _selectedVoice = voice;
     _errorMessage = null;
     if (voice != null) {
@@ -501,6 +726,11 @@ class TtsService extends ChangeNotifier {
       await _storageService.saveLanguage(voice.locale);
     }
     await _storageService.saveVoice(voice?.name, voice?.locale);
+    await _storageService.saveProviderVoice(
+      _useOfflineVoice ? OfflineVoicePack.id : 'android',
+      voice?.name,
+      voice?.locale,
+    );
     await _syncTtsOptions();
     notifyListeners();
   }
@@ -508,25 +738,30 @@ class TtsService extends ChangeNotifier {
   Future<void> setSpeechRate(double value) async {
     _speechRate = value;
     await _storageService.saveRate(value);
-    await _flutterTts.setSpeechRate(value);
+    if (!_useOfflineVoice) await _flutterTts.setSpeechRate(value);
     notifyListeners();
   }
 
   Future<void> setPitch(double value) async {
     _pitch = value;
     await _storageService.savePitch(value);
-    await _flutterTts.setPitch(value);
+    if (!_useOfflineVoice) await _flutterTts.setPitch(value);
     notifyListeners();
   }
 
   Future<void> setVolume(double value) async {
     _volume = value;
     await _storageService.saveVolume(value);
-    await _flutterTts.setVolume(value);
+    if (_useOfflineVoice) {
+      await _offlineEngine?.setVolume(value);
+    } else {
+      await _flutterTts.setVolume(value);
+    }
     notifyListeners();
   }
 
   Future<void> resetSettings() async {
+    if (_useOfflineVoice) await setOfflineVoiceEnabled(false);
     _selectedLanguage = _preferredLanguageFromVoices() ?? _defaultLanguage;
     _selectedVoice = _defaultVoiceForLanguage(_selectedLanguage);
     _speechRate = _defaultSpeechRate;
@@ -548,7 +783,7 @@ class TtsService extends ChangeNotifier {
   }
 
   Future<void> play() async {
-    if (isPlaying || _isDisposed) return;
+    if (isPlaying || _isDisposed || _switchingVoice) return;
     if (isPaused) {
       await _resumePlayback();
       return;
@@ -618,6 +853,21 @@ class TtsService extends ChangeNotifier {
   }
 
   Future<void> _resumePlayback() async {
+    if (_useOfflineVoice && _offlineEngine?.active == true) {
+      final session = ++_sessionId;
+      if (!await _activateAudioSession() || session != _sessionId) return;
+      _playbackState = ReaderPlaybackState.playing;
+      _chunkStarted = true;
+      _markPlaybackActivity(resetRecoveryAttempts: true);
+      _startPlaybackWatchdog();
+      notifyListeners();
+      try {
+        if (await _offlineEngine!.resume()) return;
+      } catch (_) {
+        // Regenerate the saved segment if the native audio cache was released.
+      }
+      if (!_isPlaybackSessionActive(session)) return;
+    }
     final resumeOffset = min(
       max(_pausedCharIndex, _activeChunkOffset),
       _text.length,
@@ -639,7 +889,18 @@ class TtsService extends ChangeNotifier {
     bool shouldStopBeforeQueueing = true,
     bool isRecovery = false,
   }) async {
-    if (!_engineReady) {
+    if (_switchingVoice) return;
+    final voice = _selectedVoice;
+    if (!_useOfflineVoice &&
+        voice?.requiresNetwork == true &&
+        !_storageService.isOnlineVoiceApproved(voice!.name, voice.locale)) {
+      _errorMessage =
+          'This voice requires internet. Choose it from Settings to confirm online speech, or select an offline voice.';
+      _playbackState = ReaderPlaybackState.error;
+      notifyListeners();
+      return;
+    }
+    if (!_engineReady && !_useOfflineVoice) {
       _errorMessage =
           'Android text-to-speech is not available. Install or enable a TTS engine first.';
       _playbackState = ReaderPlaybackState.error;
@@ -712,14 +973,15 @@ class TtsService extends ChangeNotifier {
     await _syncTtsOptions();
     if (!_isPlaybackSessionActive(localSession)) return;
     if (shouldStopBeforeQueueing) {
-      await _flutterTts.stop();
+      await _stopSpeech();
     }
     if (!_isPlaybackSessionActive(localSession)) return;
 
     final started = await _startCurrentChunk(localSession);
     if (!started && _isPlaybackSessionActive(localSession)) {
       await _handlePlaybackError(
-        'DhebeVoice could not start the selected voice. Try another installed voice.',
+        (_useOfflineVoice ? _offlineEngine?.lastError : null) ??
+            'DhebeVoice could not start the selected voice. Try another installed voice.',
       );
     }
   }
@@ -735,6 +997,20 @@ class TtsService extends ChangeNotifier {
     final chunk = _queuedChunks[_queuedChunkIndex];
     _activeChunkOffset = chunk.start;
     _currentParagraphIndex = chunk.paragraphIndex;
+    if (_useOfflineVoice) {
+      _currentCharIndex = chunk.start;
+      _pausedCharIndex = chunk.start;
+      _chunkStarted = false;
+      final started = await _offlineEngine!.speak(
+        directory: modelStore.directoryPath!,
+        text: chunk.text,
+        voice: _selectedVoice?.name ?? 'F1',
+        language: _selectedLanguage,
+        speed: (_speechRate / 0.48).clamp(0.5, 2.0),
+        volume: _volume,
+      );
+      return _isPlaybackSessionActive(sessionId) && started;
+    }
 
     await _flutterTts.setQueueMode(0);
     if (!_isPlaybackSessionActive(sessionId)) return false;
@@ -831,6 +1107,7 @@ class TtsService extends ChangeNotifier {
 
     _playbackState = ReaderPlaybackState.error;
     _errorMessage = _friendlyPlaybackError(message);
+    if (_useOfflineVoice) await _offlineEngine?.stop();
     _pausedCharIndex = min(
       max(_currentCharIndex, _activeChunkOffset),
       _text.length,
@@ -888,7 +1165,11 @@ class TtsService extends ChangeNotifier {
     _stopPlaybackWatchdog();
     _playbackState = ReaderPlaybackState.paused;
     _errorMessage = null;
-    await _flutterTts.pause();
+    if (_useOfflineVoice) {
+      await _offlineEngine?.pause();
+    } else {
+      await _flutterTts.pause();
+    }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       unawaited(AudioService.androidForceEnableMediaButtons());
     }
@@ -912,7 +1193,7 @@ class TtsService extends ChangeNotifier {
     _currentParagraphIndex = 0;
     _activeChunkOffset = 0;
     _pausedCharIndex = 0;
-    await _flutterTts.stop();
+    await _stopSpeech();
     await _audioSession?.setActive(false);
     await _storageService.savePosition(0);
     notifyListeners();
@@ -933,7 +1214,11 @@ class TtsService extends ChangeNotifier {
     required int startOffset,
     int? endOffset,
   }) {
-    return _readerText.chunks(startOffset: startOffset, endOffset: endOffset);
+    return _readerText.chunks(
+      startOffset: startOffset,
+      endOffset: endOffset,
+      maxChunkLength: _useOfflineVoice ? 240 : 2800,
+    );
   }
 
   TextSelection? _normalizedSelection(TextSelection selection) {
@@ -1011,7 +1296,10 @@ class TtsService extends ChangeNotifier {
       return;
     }
 
-    if (DateTime.now().difference(lastPlaybackActivityAt) < _watchdogTimeout) {
+    final timeout = _useOfflineVoice && _offlineEngine?.generating == true
+        ? const Duration(minutes: 3)
+        : _watchdogTimeout;
+    if (DateTime.now().difference(lastPlaybackActivityAt) < timeout) {
       return;
     }
 
@@ -1082,6 +1370,8 @@ class TtsService extends ChangeNotifier {
     _playbackWatchdog?.cancel();
     _unexpectedPauseRecoveryTimer?.cancel();
     unawaited(_flutterTts.stop());
+    unawaited(_offlineEngine?.dispose());
+    modelStore.dispose();
     super.dispose();
   }
 }

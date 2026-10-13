@@ -24,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final TextEditingController _textController;
   StreamSubscription<List<SharedMediaFile>>? _shareSubscription;
   bool _isImportDialogOpen = false;
+  DialogRoute<void>? _importProgressRoute;
   bool _isImportSetupDialogOpen = false;
   bool _isImportDialogMinimized = false;
   bool _hasScheduledFirstRunGuide = false;
@@ -732,12 +733,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return;
         }
         _isImportDialogOpen = true;
-        showDialog<void>(
+        final route = DialogRoute<void>(
           context: context,
           barrierDismissible: false,
           builder: (context) => _ImportProgressDialog(
             onMinimize: () {
-              Navigator.of(context, rootNavigator: true).pop();
+              _closeImportProgress();
               if (mounted) {
                 setState(() {
                   _isImportDialogMinimized = true;
@@ -745,14 +746,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }
             },
           ),
-        ).then((_) {
-          _isImportDialogOpen = false;
+        );
+        _importProgressRoute = route;
+        Navigator.of(context, rootNavigator: true).push(route).then((_) {
+          if (identical(_importProgressRoute, route)) {
+            _importProgressRoute = null;
+            _isImportDialogOpen = false;
+          }
         });
         return;
       }
 
       if (!importer.isImporting && _isImportDialogOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
+        _closeImportProgress();
         return;
       }
 
@@ -762,6 +768,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
     });
+  }
+
+  void _closeImportProgress() {
+    final route = _importProgressRoute;
+    _importProgressRoute = null;
+    _isImportDialogOpen = false;
+    if (route == null || !route.isActive) return;
+    final navigator = route.navigator;
+    if (route.isCurrent) {
+      navigator?.pop();
+    } else {
+      navigator?.removeRoute(route);
+    }
   }
 
   @override
@@ -814,9 +833,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               IconButton(
                 tooltip: 'Import .txt, .epub, or .pdf file',
-                onPressed: () async {
-                  await importer.importLocalFile();
-                },
+                onPressed: importer.isImporting
+                    ? null
+                    : () async {
+                        await importer.importLocalFile();
+                      },
                 icon: const Icon(Icons.upload_file),
               ),
               IconButton(
@@ -928,6 +949,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             unawaited(importer.importPendingSharedUrl()),
                         onClearSharedLink: () =>
                             unawaited(importer.clearPendingSharedUrl()),
+                      ),
+                    if (!importer.isImporting &&
+                        !importer.hasPendingSharedUrl &&
+                        (importer.importStatus != null ||
+                            importer.errorMessage != null))
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  [
+                                    if (importer.importStatus != null)
+                                      importer.importStatus!,
+                                    if (importer.errorMessage != null)
+                                      importer.errorMessage!,
+                                  ].join('\n'),
+                                  style: importer.errorMessage == null
+                                      ? null
+                                      : TextStyle(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.error,
+                                        ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Dismiss import message',
+                                onPressed: importer.clearImportMessage,
+                                icon: const Icon(Icons.close),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     if (importer.activeNovel != null) ...[
                       if (importer.isImporting && _isImportDialogMinimized)
@@ -1156,9 +1213,10 @@ class _ImportProgressDialog extends StatelessWidget {
               : (importer.importProgress! * 100).clamp(0, 100).round();
 
           return AlertDialog(
+            scrollable: true,
             title: Row(
               children: [
-                const Expanded(child: Text('Importing web content')),
+                const Expanded(child: Text('Importing content')),
                 IconButton(
                   tooltip: 'Close',
                   onPressed: onMinimize,
@@ -1189,7 +1247,7 @@ class _ImportProgressDialog extends StatelessWidget {
                   ] else ...[
                     const SizedBox(height: 10),
                     Text(
-                      'Following links and importing text...',
+                      'Preparing and importing text...',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurface,
                       ),
@@ -1243,7 +1301,7 @@ class _ImportMiniBar extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'Importing web content',
+                    'Importing content',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),

@@ -23,6 +23,17 @@ const _systemChannel = MethodChannel('com.dhebe.dhebevoice/system');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    for (final entry in const {
+      'Supertonic 3 model (OpenRAIL-M)': 'supertonic-model',
+      'Supertonic inference reference (MIT)': 'supertonic-code',
+      'ONNX Runtime (MIT)': 'onnxruntime',
+    }.entries) {
+      yield LicenseEntryWithLineBreaks([
+        entry.key,
+      ], await rootBundle.loadString('assets/licenses/${entry.value}.txt'));
+    }
+  });
 
   final storageService = StorageService();
   await storageService.initialize();
