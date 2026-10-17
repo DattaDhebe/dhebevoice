@@ -29,18 +29,28 @@ DhebeVoice is an Android text-to-speech reader built with Flutter and Kotlin. Li
 
 <table>
   <tr>
-    <th>Read and listen</th>
+    <th>Your reading space</th>
+    <th>Follow the narration</th>
     <th>Keep your books</th>
-    <th>Personalize playback</th>
   </tr>
   <tr>
-    <td><img src="assets/store/screenshots/screen-1-home.png" alt="DhebeVoice reader with Now reading and playback controls" width="240"></td>
-    <td><img src="assets/store/screenshots/screen-3-library.jpg" alt="Book List with an example imported book" width="240"></td>
-    <td><img src="assets/store/screenshots/screen-4-settings.png" alt="DhebeVoice voice and playback settings" width="240"></td>
+    <td><img src="assets/store/screenshots/phone-01-reader.png" alt="Current book, chapter navigation, editable reading content, and pinned playback controls" width="240"></td>
+    <td><img src="assets/store/screenshots/phone-02-now-reading.png" alt="Alice's Adventures in Wonderland playing with highlighted passage and paragraph controls" width="240"></td>
+    <td><img src="assets/store/screenshots/phone-03-library.png" alt="Searchable Book List with imported public-domain classics" width="240"></td>
+  </tr>
+  <tr>
+    <th>Read in full view</th>
+    <th>Choose your voice</th>
+    <th>Tune your listening</th>
+  </tr>
+  <tr>
+    <td><img src="assets/store/screenshots/phone-04-full-reading.png" alt="Full Now reading view with paragraph navigation and fixed Resume, Pause, and Stop controls" width="240"></td>
+    <td><img src="assets/store/screenshots/phone-07-voices.png" alt="Searchable Android voice cards with full language names and offline or online labels" width="240"></td>
+    <td><img src="assets/store/screenshots/phone-06-settings.png" alt="Language, installed voice, and optional online Android voice settings" width="240"></td>
   </tr>
 </table>
 
-Screenshots show an earlier app build; current controls and voice selection have evolved.
+Real Android captures from the current development build, taken on October 17, 2026. These screens are newer than the submitted Play build. The books were imported for this demonstration, not bundled with the app. See [all seven upload-ready screenshots and content credits](assets/store/screenshots/README.md).
 
 ## Features
 
