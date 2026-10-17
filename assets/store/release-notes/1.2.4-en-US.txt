@@ -1,0 +1,7 @@
+<en-US>
+- Redesigned home screen with clearer book and chapter navigation.
+- Pinned playback controls, paragraph shortcuts, and quick voice settings.
+- Android voice-type information and optional personal voice labels.
+- Improved layouts for smaller screens and larger text.
+- Updated store screenshots showing the latest reading experience.
+</en-US>

@@ -1,14 +1,15 @@
 # Store Screenshots
 
 Seven real-device captures of the current DhebeVoice development UI, taken on
-October 17, 2026, using the separate DhebeVoice Test app on Android 16. They are
-newer than the submitted Play 1.2.3 (11) bundle. Save them as a listing draft
-until a matching app release is ready; do not represent them as already live.
+October 17, 2026, using the separate DhebeVoice Test app on Android 16. They
+show the 1.2.4 reading experience and replace the older 1.2.3 listing images.
 
 All seven replacement phone screenshots were uploaded and saved as a Google
-Play Console listing draft on October 17, 2026. They were not submitted for
-review. The icon, feature graphic, listing descriptions, and existing release
-review were left unchanged.
+Play Console listing draft on October 17, 2026, then submitted together with
+version 1.2.4 (12) to Closed testing - Alpha on the same day. Play Console shows
+**Changes in review**, with automated quick checks still running. This is not
+a claim that the update is approved or live. The icon, feature graphic, listing
+descriptions, tester audience, and publishing mode were left unchanged.
 
 ## Upload Order
 
@@ -62,8 +63,8 @@ a partnership with the authors or Project Gutenberg, or a book-download service.
 - Restore temporary display/status-bar settings and stop test narration.
 - Replace only phone screenshots in Play Console; preserve icon, feature
   graphic, tablet screenshots, descriptions, and the release already in review.
-- Save the listing as a draft for the matching release, not a standalone review
-  submission with screenshots of features absent from the current bundle.
+- Submit listing changes with the matching app release, not as a standalone
+  update showing features absent from the submitted bundle.
 
 See [Google Play preview asset guidance](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en)
 for current upload requirements.

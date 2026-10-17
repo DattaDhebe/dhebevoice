@@ -2,7 +2,12 @@
 
 This file distinguishes current source changes from previously uploaded app bundles. A Git commit is not a Google Play release or approval.
 
-## Unreleased
+## 1.2.4 (12)
+
+Submitted on October 17, 2026, to the existing Google Play Closed testing -
+Alpha track together with the updated phone screenshots. Play Console shows
+**Changes in review**; automated quick checks run before review. This is not a
+claim of approval or public production availability.
 
 - Refresh the home reader with clearer book/chapter hierarchy, a compact borderless editor, an uncluttered empty state, and a persistent playback dock.
 - Add home-screen paragraph shortcuts and direct voice-settings access; preserve full reading views, imports, text selection, and existing playback behavior.
@@ -11,6 +16,11 @@ This file distinguishes current source changes from previously uploaded app bund
 - Add persistence, playback, save-failure, and small-screen regression coverage for voice labeling.
 - Refresh the repository overview, screenshots, feature documentation, development guidance, and issue templates.
 - Align the GitHub repository name with the DhebeVoice brand and update repository links; the Android app identity is unchanged.
+
+The sample classics shown in the screenshots are not bundled with the app.
+Roman-numeral EPUB chapter badges can still display an incorrect number;
+narration generation can still buffer on slower devices.
+[Submitted release-note text](assets/store/release-notes/1.2.4-en-US.txt).
 
 ## 1.2.3 (11)
 
