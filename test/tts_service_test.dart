@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:text_reader_app/models/novel_book.dart';
+import 'package:text_reader_app/models/voice_model.dart';
 import 'package:text_reader_app/services/file_import_service.dart';
 import 'package:text_reader_app/services/novel_import_controller.dart';
 import 'package:text_reader_app/services/novel_library_service.dart';
@@ -21,6 +22,13 @@ class RecordingStorage extends StorageService {
   final positions = <int>[];
   Completer<void>? positionBarrier;
   Completer<void>? chapterBarrier;
+  Completer<void>? languageBarrier;
+
+  @override
+  Future<void> saveLanguage(String value) async {
+    await super.saveLanguage(value);
+    if (value == 'hi-IN') await languageBarrier?.future;
+  }
 
   @override
   Future<void> saveActiveChapterIndex(int value) async {
@@ -88,7 +96,9 @@ void main() {
   Completer<void>? queueBarrier;
   Completer<void>? stopBarrier;
   late List<String> nativeCalls;
+  late List<MethodCall> nativeArguments;
   late List<bool> focusChanges;
+  Object? defaultEngine;
   Future<bool> Function(bool active)? focusOverride;
   var failPause = false;
   late DateTime now;
@@ -104,16 +114,23 @@ void main() {
     queueBarrier = null;
     stopBarrier = null;
     nativeCalls = [];
+    nativeArguments = [];
     focusChanges = [];
+    defaultEngine = 'com.test.speech';
     focusOverride = null;
     failPause = false;
     now = DateTime(2026, 10, 17);
     messenger.setMockMethodCallHandler(sessionChannel, (_) async => null);
     messenger.setMockMethodCallHandler(ttsChannel, (call) async {
       nativeCalls.add(call.method);
+      nativeArguments.add(call);
+      if (call.method == 'getDefaultEngine') return defaultEngine;
       if (call.method == 'getVoices') {
         return [
           {'name': 'en-in-x-ene-local', 'locale': 'en-IN'},
+          {'name': 'alternate', 'locale': 'en-IN', 'network_required': '0'},
+          {'name': 'hindi-local', 'locale': 'hi-IN', 'network_required': '0'},
+          {'name': 'french-online', 'locale': 'fr-FR', 'network_required': '1'},
         ];
       }
       if (call.method == 'setQueueMode') await queueBarrier?.future;
@@ -169,6 +186,211 @@ void main() {
     engine.continueHandler!();
     expect(service.playbackState, ReaderPlaybackState.stopped);
   });
+
+  test(
+    'labeling Android voices never interrupts or changes synthesis',
+    () async {
+      await service.updateText('First paragraph.\n\nSecond paragraph.');
+      await service.play();
+      engine.startHandler!();
+      engine.progressHandler!('First paragraph.', 6, 15, 'paragraph');
+      final voice = service.selectedVoice!;
+      final session = service.playbackSessionId;
+      nativeCalls.clear();
+      focusChanges.clear();
+
+      expect(service.canLabelAndroidVoices, isTrue);
+      expect(voice.personaLabel, isNull);
+      await service.setVoiceTypeLabel(voice, 'Female');
+      expect(service.selectedVoice?.personaLabel, 'Female');
+      expect(service.selectedVoice?.userPersonaLabel, 'Female');
+      expect(service.selectedVoice?.toTtsMap(), voice.toTtsMap());
+      expect(service.playbackSessionId, session);
+      expect(service.currentCharIndex, 6);
+      expect(service.isPlaying, isTrue);
+      expect(nativeCalls, isEmpty);
+      expect(focusChanges, isEmpty);
+
+      await service.refreshVoices();
+      expect(service.selectedVoice?.personaLabel, 'Female');
+      nativeCalls.clear();
+      await service.setVoiceTypeLabel(service.selectedVoice!, null);
+      expect(service.selectedVoice?.personaDisplayLabel, 'Gender not provided');
+      expect(nativeCalls, isEmpty);
+      expect(service.isPlaying, isTrue);
+      engine.completionHandler!();
+      await flushCallbacks();
+      expect(spoken, ['First paragraph.', 'Second paragraph.']);
+    },
+  );
+
+  test('Android voice labels are isolated by engine identity', () async {
+    final voice = service.selectedVoice!;
+    await service.setVoiceTypeLabel(voice, 'Male');
+    defaultEngine = 'com.other.speech';
+    await service.refreshVoices();
+    expect(service.selectedVoice?.personaLabel, isNull);
+    await service.setVoiceTypeLabel(service.selectedVoice!, 'Child');
+    defaultEngine = 'com.test.speech';
+    await service.refreshVoices();
+    expect(service.selectedVoice?.personaLabel, 'Male');
+  });
+
+  test(
+    'missing engine identity keeps voices usable without saved labels',
+    () async {
+      await service.setVoiceTypeLabel(service.selectedVoice!, 'Male');
+      defaultEngine = null;
+      await service.refreshVoices();
+      expect(service.voices, isNotEmpty);
+      expect(service.selectedVoice?.personaLabel, isNull);
+      expect(service.canLabelAndroidVoices, isFalse);
+      await expectLater(
+        service.setVoiceTypeLabel(service.selectedVoice!, 'Female'),
+        throwsStateError,
+      );
+      await service.updateText('Still readable.');
+      await service.play();
+      expect(service.isPlaying, isTrue);
+    },
+  );
+
+  test(
+    'language changes keep playing and apply at the next speech boundary',
+    () async {
+      await service.updateText('First paragraph.\n\nSecond paragraph.');
+      await service.play();
+      engine.startHandler!();
+      engine.progressHandler!('First paragraph.', 6, 15, 'paragraph');
+      nativeCalls.clear();
+      final session = service.playbackSessionId;
+      await service.setLanguage('hi-IN');
+      expect(service.isPlaying, isTrue);
+      expect(service.currentCharIndex, 6);
+      expect(service.playbackSessionId, session);
+      expect(
+        nativeCalls,
+        isNot(contains(anyOf('pause', 'stop', 'setLanguage'))),
+      );
+      engine.completionHandler!();
+      await flushCallbacks();
+      expect(spoken, ['First paragraph.', 'Second paragraph.']);
+      expect(
+        nativeArguments
+            .lastWhere((call) => call.method == 'setLanguage')
+            .arguments,
+        'hi-IN',
+      );
+      expect(service.selectedVoice?.name, 'hindi-local');
+      expect(service.isPlaying, isTrue);
+    },
+  );
+
+  test(
+    'latest voice selection wins without stopping the current paragraph',
+    () async {
+      await service.updateText('First.\n\nSecond.');
+      await service.play();
+      engine.startHandler!();
+      nativeCalls.clear();
+      final alternate = service.voices.firstWhere(
+        (voice) => voice.name == 'alternate',
+      );
+      final first = service.setVoice(alternate);
+      final second = service.setVoice(
+        service.voices.firstWhere((voice) => voice.name == 'en-in-x-ene-local'),
+      );
+      await first;
+      await second;
+      expect(service.isPlaying, isTrue);
+      expect(nativeCalls, isNot(contains(anyOf('pause', 'stop', 'setVoice'))));
+      engine.completionHandler!();
+      await flushCallbacks();
+      expect(
+        (nativeArguments
+                .lastWhere((call) => call.method == 'setVoice')
+                .arguments
+            as Map)['name'],
+        'en-in-x-ene-local',
+      );
+      expect(spoken, ['First.', 'Second.']);
+    },
+  );
+
+  test(
+    'language changes while paused do not start playback by themselves',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      await service.pause();
+      await service.setLanguage('hi-IN');
+      expect(service.isPaused, isTrue);
+      expect(spoken, ['Story.']);
+      await service.play();
+      expect(service.isPlaying, isTrue);
+      expect(service.selectedLanguage, 'hi-IN');
+    },
+  );
+
+  test(
+    'Stop after a voice change cancels speech and automatic continuation',
+    () async {
+      await service.updateText('First.\n\nSecond.');
+      await service.play();
+      engine.startHandler!();
+      await service.setLanguage('hi-IN');
+      await service.stop();
+      engine.completionHandler!();
+      await flushCallbacks();
+      expect(spoken, ['First.']);
+      expect(service.playbackState, ReaderPlaybackState.stopped);
+    },
+  );
+
+  test(
+    'unsupported or unapproved language leaves the current voice playing',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      final original = service.selectedLanguage;
+      await service.setLanguage('xx-YY');
+      expect(service.selectedLanguage, original);
+      expect(service.isPlaying, isTrue);
+      await service.setLanguage('fr-FR');
+      expect(service.selectedLanguage, original);
+      expect(service.isPlaying, isTrue);
+      expect(service.errorMessage, contains('confirm'));
+      await service.setVoice(
+        const VoiceModel(
+          name: 'french-online',
+          locale: 'fr-FR',
+          label: 'French',
+          requiresNetwork: true,
+        ),
+        confirmOnline: true,
+      );
+      expect(service.selectedLanguage, 'fr-FR');
+      expect(service.isPlaying, isTrue);
+    },
+  );
+
+  test(
+    'a slower earlier selection cannot overwrite the latest saved voice',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      storage.languageBarrier = Completer<void>();
+      final first = service.setLanguage('hi-IN');
+      await flushCallbacks();
+      await service.setLanguage('en-IN');
+      storage.languageBarrier!.complete();
+      await first;
+      expect(service.selectedLanguage, 'en-IN');
+      expect(storage.language, 'en-IN');
+      expect(storage.voiceName, 'en-in-x-ene-local');
+      expect(service.isPlaying, isTrue);
+    },
+  );
 
   test('repeated Play is idempotent while audio focus is pending', () async {
     await service.updateText('Story.');

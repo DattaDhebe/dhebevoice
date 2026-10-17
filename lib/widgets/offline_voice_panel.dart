@@ -184,10 +184,36 @@ class _OfflineVoicePanelState extends State<OfflineVoicePanel> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                   ),
-                if (service.usesOfflineVoice)
+                if (service.usesOfflineVoice) ...[
+                  const SizedBox(height: 16),
+                  const Text('Quality narration (5 steps)'),
+                  const SizedBox(height: 12),
                   const Text(
-                    'The next segment is prepared while you listen to reduce pauses. Initial conversion and slower phones can still take time. Pitch is fixed; rate changes apply to the next segment. Playback position is saved at segment boundaries.',
+                    'The experimental 3-step mode was removed because it can distort speech. Quality does not change your listening speed; use Speech rate below.',
                   ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Background preparation is the default: playback starts when the first audio is ready, while up to eight upcoming segments are generated ahead. Quality and speech rate stay unchanged.',
+                  ),
+                  SwitchListTile.adaptive(
+                    key: const Key('neural-chapter-preparation'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Wait for the whole chapter (optional)'),
+                    subtitle: const Text(
+                      'Off: start sooner and prepare ahead while listening. On: wait for the whole chapter first.',
+                    ),
+                    value: service.prepareNeuralChapter,
+                    onChanged: service.setPrepareNeuralChapter,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Voice or rate changes prepare the remaining chapter at the next segment. Preparation supports up to 50,000 text characters and 256 MB of temporary audio.',
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'On slower phones, generation may still fall behind playback and show buffering. Audio stays on this device and is cleared on Stop. Pause retains streaming audio; pausing whole-chapter preparation cancels that job. Pitch is fixed. Playback position is saved at segment boundaries.',
+                  ),
+                ],
               ],
             ),
           ),

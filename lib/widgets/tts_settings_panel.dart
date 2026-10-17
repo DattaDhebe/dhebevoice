@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../models/speech_locale.dart';
 import '../models/voice_model.dart';
+import 'voice_avatar.dart';
+import 'voice_picker_sheet.dart';
 
 class TtsSettingsPanel extends StatelessWidget {
   const TtsSettingsPanel({
@@ -20,6 +23,7 @@ class TtsSettingsPanel extends StatelessWidget {
     this.pitchEnabled = true,
     this.onRefreshVoices,
     this.onBestVoice,
+    this.onVoiceTypeChanged,
     this.showOnlineVoices = true,
     this.padding = const EdgeInsets.fromLTRB(20, 12, 20, 24),
   });
@@ -40,6 +44,8 @@ class TtsSettingsPanel extends StatelessWidget {
   final bool pitchEnabled;
   final VoidCallback? onRefreshVoices;
   final VoidCallback? onBestVoice;
+  final Future<void> Function(VoiceModel voice, String? type)?
+  onVoiceTypeChanged;
   final bool showOnlineVoices;
 
   Future<void> _chooseVoice(
@@ -47,12 +53,25 @@ class TtsSettingsPanel extends StatelessWidget {
     List<VoiceModel> choices, {
     bool onlineOnly = false,
   }) async {
-    final result = await showSearch<VoiceModel?>(
+    final result = await showModalBottomSheet<VoiceModel>(
       context: context,
-      delegate: _VoiceSearchDelegate(
-        voices: choices,
-        selectedVoice: selectedVoice,
-        onlineOnly: onlineOnly,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      constraints: const BoxConstraints(maxWidth: 760),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: FractionallySizedBox(
+          heightFactor: .9,
+          child: VoicePickerSheet(
+            voices: choices,
+            selectedVoice: selectedVoice,
+            onlineOnly: onlineOnly,
+            onVoiceTypeChanged: onVoiceTypeChanged,
+          ),
+        ),
       ),
     );
     if (result == null || !context.mounted) return;
@@ -83,6 +102,8 @@ class TtsSettingsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final sortedLanguages = [...languages]
+      ..sort((a, b) => SpeechLocale.label(a).compareTo(SpeechLocale.label(b)));
     final languageVoices = voices
         .where((voice) => voice.locale == selectedLanguage)
         .toList();
@@ -115,20 +136,39 @@ class TtsSettingsPanel extends StatelessWidget {
                   DropdownButtonFormField<String>(
                     key: ValueKey(selectedLanguage),
                     isExpanded: true,
+                    isDense: false,
+                    itemHeight: null,
+                    menuMaxHeight: MediaQuery.sizeOf(context).height * .6,
                     initialValue: languages.contains(selectedLanguage)
                         ? selectedLanguage
                         : (languages.isEmpty ? null : languages.first),
-                    items: languages
+                    selectedItemBuilder: (_) => sortedLanguages
+                        .map(
+                          (language) => Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Tooltip(
+                              message: SpeechLocale.label(language),
+                              child: Text(
+                                SpeechLocale.label(language),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    items: sortedLanguages
                         .map(
                           (language) => DropdownMenuItem(
                             value: language,
-                            child: Text(language),
+                            child: Text(SpeechLocale.label(language)),
                           ),
                         )
                         .toList(),
                     onChanged: onLanguageChanged,
                     decoration: const InputDecoration(
                       hintText: 'Select a language',
+                      prefixIcon: Icon(Icons.language),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -138,12 +178,18 @@ class TtsSettingsPanel extends StatelessWidget {
                     onPressed: languageVoices.isEmpty
                         ? null
                         : () => _chooseVoice(context, languageVoices),
-                    icon: const Icon(Icons.record_voice_over),
+                    icon: selectedVoice == null
+                        ? const Icon(Icons.record_voice_over)
+                        : VoiceAvatar(voice: selectedVoice!, size: 28),
                     label: Text(
                       selectedVoice?.selectionLabel ?? 'Choose installed voice',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Voice and language changes continue automatically at the next speech segment. Language changes pronunciation, not the written text.',
                   ),
                   if (showOnlineVoices) ...[
                     const SizedBox(height: 8),
@@ -188,12 +234,15 @@ class TtsSettingsPanel extends StatelessWidget {
           ),
           _SettingSlider(
             title: 'Speech rate',
-            value: rate,
-            min: 0.1,
-            max: 1.0,
-            divisions: 18,
-            valueText: rate.toStringAsFixed(2),
-            onChanged: onRateChanged,
+            value: pitchEnabled ? rate : (rate / .48).clamp(.5, 2),
+            min: pitchEnabled ? 0.1 : .5,
+            max: pitchEnabled ? 1.0 : 2,
+            divisions: pitchEnabled ? 18 : 30,
+            valueText: pitchEnabled
+                ? rate.toStringAsFixed(2)
+                : '${(rate / .48).clamp(.5, 2).toStringAsFixed(2)}x',
+            onChanged: (value) =>
+                onRateChanged(pitchEnabled ? value : value * .48),
           ),
           if (pitchEnabled)
             _SettingSlider(
@@ -270,151 +319,6 @@ class _SettingSlider extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _VoiceSearchDelegate extends SearchDelegate<VoiceModel?> {
-  _VoiceSearchDelegate({
-    required this.voices,
-    required this.selectedVoice,
-    this.onlineOnly = false,
-  }) : _connection = ValueNotifier<String>(onlineOnly ? 'Online' : 'All');
-
-  final List<VoiceModel> voices;
-  final VoiceModel? selectedVoice;
-  final bool onlineOnly;
-  final ValueNotifier<String> _connection;
-
-  @override
-  void dispose() {
-    _connection.dispose();
-    super.dispose();
-  }
-
-  @override
-  ThemeData appBarTheme(BuildContext context) => Theme.of(context);
-
-  @override
-  List<Widget>? buildActions(BuildContext context) {
-    return [
-      if (query.isNotEmpty)
-        IconButton(onPressed: () => query = '', icon: const Icon(Icons.clear)),
-    ];
-  }
-
-  @override
-  Widget? buildLeading(BuildContext context) {
-    return IconButton(
-      onPressed: () => close(context, null),
-      icon: const Icon(Icons.arrow_back),
-    );
-  }
-
-  @override
-  Widget buildResults(BuildContext context) => _buildVoiceList(context);
-
-  @override
-  Widget buildSuggestions(BuildContext context) => _buildVoiceList(context);
-
-  Widget _buildVoiceList(
-    BuildContext context,
-  ) => ValueListenableBuilder<String>(
-    valueListenable: _connection,
-    builder: (context, filter, _) => Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Wrap(
-            spacing: 8,
-            children: [
-              for (final label
-                  in onlineOnly ? ['Online'] : ['All', 'Offline', 'Online'])
-                ChoiceChip(
-                  label: Text(label),
-                  selected: filter == label,
-                  onSelected: (_) => _connection.value = label,
-                ),
-            ],
-          ),
-        ),
-        if (filter == 'Online')
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Online voices come from your installed Android TTS engine, not a DhebeVoice paid API. Availability depends on that engine.',
-            ),
-          ),
-        Expanded(child: _filteredVoiceList(context, filter)),
-      ],
-    ),
-  );
-
-  Widget _filteredVoiceList(BuildContext context, String filter) {
-    final normalizedQuery = query.trim().toLowerCase();
-    final filtered = voices.where((voice) {
-      if (filter == 'Offline' && voice.requiresNetwork != false) return false;
-      if (filter == 'Online' && voice.requiresNetwork != true) return false;
-      if (normalizedQuery.isEmpty) {
-        return true;
-      }
-      return voice.label.toLowerCase().contains(normalizedQuery) ||
-          voice.selectionLabel.toLowerCase().contains(normalizedQuery) ||
-          voice.name.toLowerCase().contains(normalizedQuery) ||
-          voice.locale.toLowerCase().contains(normalizedQuery) ||
-          voice.detailsLabel.toLowerCase().contains(normalizedQuery);
-    }).toList();
-
-    if (filtered.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            onlineOnly && voices.isEmpty
-                ? 'No online voices are exposed by your current Android TTS engine. Check device TTS settings, update the engine, then reopen DhebeVoice and refresh voices.'
-                : 'No installed voices match that search.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      itemCount: filtered.length,
-      itemBuilder: (context, index) {
-        final voice = filtered[index];
-        final isSelected =
-            selectedVoice?.name == voice.name &&
-            selectedVoice?.locale == voice.locale;
-        return ListTile(
-          title: Text(voice.label),
-          subtitle: Text(
-            [voice.detailsLabel, ...voice.metadataLabels].join('\n'),
-          ),
-          trailing: isSelected
-              ? const Icon(Icons.check_circle)
-              : voice.personaLabel == null
-              ? null
-              : Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    voice.personaLabel!,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-          onTap: () => close(context, voice),
-        );
-      },
     );
   }
 }

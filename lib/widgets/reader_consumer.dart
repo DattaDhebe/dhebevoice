@@ -42,6 +42,8 @@ class TtsSettingsConsumer extends StatelessWidget {
       service.speechRate,
       service.pitch,
       service.volume,
+      service.neuralSteps,
+      service.prepareNeuralChapter,
       service.usesOfflineVoice,
       service.switchingVoice,
       service.errorMessage,

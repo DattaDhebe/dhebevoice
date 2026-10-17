@@ -10,7 +10,9 @@ import '../services/audio_handler_controller.dart';
 import '../services/novel_import_controller.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
+import '../widgets/import_web_link_dialog.dart';
 import '../widgets/player_controls.dart';
+import '../widgets/playback_status.dart';
 import '../widgets/reader_consumer.dart';
 import '../widgets/reader_list_sheet.dart';
 import '../widgets/reader_view_dialog.dart';
@@ -208,76 +210,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_isImportSetupDialogOpen) {
       return;
     }
-    final controller = TextEditingController(
-      text: importer.pendingSharedUrl ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
     _isImportSetupDialogOpen = true;
-
+    String? url;
     try {
-      await showDialog<void>(
+      url = await showDialog<String>(
         context: context,
-        builder: (context) {
-          return AlertDialog(
-            scrollable: true,
-            title: const Text('Import web link'),
-            content: Form(
-              key: formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: controller,
-                    autofocus: !importer.hasPendingSharedUrl,
-                    keyboardType: TextInputType.url,
-                    minLines: 1,
-                    maxLines: 3,
-                    autocorrect: false,
-                    validator: (value) {
-                      final uri = Uri.tryParse(value?.trim() ?? '');
-                      return uri != null &&
-                              (uri.scheme == 'https' || uri.scheme == 'http') &&
-                              uri.host.isNotEmpty
-                          ? null
-                          : 'Enter a complete http or https web link.';
-                    },
-                    decoration: const InputDecoration(
-                      labelText: 'Web page URL',
-                      hintText: 'https://example.com/page',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Import only text you own, are licensed to access, or that is in the public domain.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  if (formKey.currentState?.validate() != true) return;
-                  final url = controller.text.trim();
-                  Navigator.of(context).pop();
-                  await importer.importNovelFromUrl(url);
-                },
-                child: const Text('Start import'),
-              ),
-            ],
-          );
-        },
+        builder: (_) =>
+            ImportWebLinkDialog(initialUrl: importer.pendingSharedUrl ?? ''),
       );
     } finally {
       _isImportSetupDialogOpen = false;
-      controller.dispose();
+    }
+    if (mounted && url != null) {
+      await importer.importNovelFromUrl(url);
     }
   }
 
@@ -829,6 +774,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 840),
                   child: PlayerControls(
+                    status: PlaybackStatus(
+                      service: ttsService,
+                      compact:
+                          isKeyboardOpen ||
+                          MediaQuery.textScalerOf(context).scale(1) > 1.4,
+                    ),
+                    stopEnabled:
+                        ttsService.isPlaying ||
+                        ttsService.isPaused ||
+                        ttsService.isAdvancingChapter ||
+                        ttsService.switchingVoice,
                     enabled:
                         controlsReady &&
                         !ttsService.switchingVoice &&
@@ -1705,6 +1661,10 @@ class _NowReadingCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
+            if (ttsService.selectedVoice != null) ...[
+              SelectedVoiceLabel(service: ttsService),
+              const SizedBox(height: 14),
+            ],
             Text(
               ttsService.paragraphCount == 0
                   ? 'Ready when you are'
@@ -1724,23 +1684,14 @@ class _NowReadingCard extends StatelessWidget {
                 semanticsLabel: 'Chapter reading progress',
               ),
               const SizedBox(height: 8),
-              Text(
-                ttsService.isAdvancingChapter
-                    ? 'Loading next chapter...'
-                    : ttsService.isBuffering
-                    ? 'Preparing speech...'
-                    : ttsService.isPlaying
-                    ? 'Playing'
-                    : ttsService.isPaused
-                    ? 'Paused - your place is saved'
-                    : 'Ready to read',
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
+              PlaybackStatus(service: ttsService),
             ],
             if (chapterLabel != null) ...[
               const SizedBox(height: 8),
               Text(
                 chapterText,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurface,
                   fontWeight: FontWeight.w700,
@@ -1748,14 +1699,22 @@ class _NowReadingCard extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 12),
-            Text(
-              ttsService.currentParagraph,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                height: 1.45,
-                color: colorScheme.primary,
-                fontWeight: FontWeight.w500,
+            Container(
+              padding: const EdgeInsets.only(left: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(color: colorScheme.primary, width: 3),
+                ),
+              ),
+              child: Text(
+                ttsService.currentParagraph,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  height: 1.45,
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
             if (ttsService.paragraphCount > 0) ...[

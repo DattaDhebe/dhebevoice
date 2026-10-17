@@ -22,6 +22,7 @@ class ProgressImporter extends NovelImportController {
       );
   bool running = false;
   bool stopped = false;
+  final importedUrls = <String>[];
   @override
   bool get isImporting => running;
   @override
@@ -29,6 +30,13 @@ class ProgressImporter extends NovelImportController {
       running ? 'Downloading Chapter 102 - ${'A long title ' * 70}' : null;
   @override
   double? get importProgress => running ? 0.5 : null;
+  @override
+  Future<void> importNovelFromUrl(String url, {String? accessModeId}) async {
+    importedUrls.add(url);
+    running = true;
+    notifyListeners();
+  }
+
   @override
   Future<void> cancelImport() async {
     stopped = true;
@@ -38,6 +46,96 @@ class ProgressImporter extends NovelImportController {
 }
 
 void main() {
+  for (final action in ['Start import', 'Cancel', 'Back']) {
+    testWidgets('URL dialog safely closes with focused field via $action', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({'reader_home_guide_seen': true});
+      ReceiveSharingIntent.setMockValues(
+        initialMedia: [],
+        mediaStream: const Stream.empty(),
+      );
+      final storage = StorageService();
+      await storage.initialize();
+      final theme = ThemeController(storageService: storage);
+      await theme.initialize();
+      final tts = TtsService(
+        storageService: storage,
+        fileImportService: FileImportService(),
+      );
+      final audio = AudioHandlerController();
+      final importer = ProgressImporter(
+        storageService: storage,
+        ttsService: tts,
+      );
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('flutter_tts'),
+        (_) async => 1,
+      );
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        TextReaderApp(
+          storageService: storage,
+          themeController: theme,
+          ttsService: tts,
+          novelImportController: importer,
+          audioHandlerController: audio,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byTooltip('Import web link'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.enterText(
+        find.byType(TextFormField),
+        'https://example.com/chapter-1',
+      );
+      expect(importer.importedUrls, isEmpty);
+      if (action == 'Back') {
+        Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+      } else {
+        await tester.tap(find.text(action));
+      }
+      // Check during the reverse animation, while the URL field still exists.
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(tester.takeException(), isNull);
+      if (action == 'Start import') {
+        expect(importer.importedUrls, ['https://example.com/chapter-1']);
+        await tester.pump();
+        expect(find.text('Importing content'), findsOneWidget);
+        await importer.cancelImport();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      } else {
+        expect(importer.importedUrls, isEmpty);
+      }
+      // A fresh controller and form must also work on the next opening.
+      await tester.tap(find.byTooltip('Import web link'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(TextFormField), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      importer.dispose();
+      tts.dispose();
+      audio.dispose();
+      theme.dispose();
+      await tester.pump();
+    });
+  }
+
   testWidgets('long import progress scrolls and Close does not stop import', (
     tester,
   ) async {

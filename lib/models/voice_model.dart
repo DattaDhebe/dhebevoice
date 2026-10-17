@@ -1,50 +1,77 @@
+import 'voice_names.dart';
+
 class VoiceModel {
   const VoiceModel({
     required this.name,
     required this.locale,
     required this.label,
-    this.personaLabel,
+    String? personaLabel,
+    this.userPersonaLabel,
     this.metadataLabels = const [],
     this.qualityScore,
     this.requiresNetwork,
     this.isInstalled = true,
-  });
+  }) : reportedPersonaLabel = personaLabel;
 
   final String name;
   final String locale;
   final String label;
-  final String? personaLabel;
+  final String? reportedPersonaLabel;
+  final String? userPersonaLabel;
+  String? get personaLabel => userPersonaLabel ?? reportedPersonaLabel;
+  String get personaDisplayLabel => personaLabel ?? 'Gender not provided';
+  static const personaTypes = {'Female', 'Male', 'Child'};
   final List<String> metadataLabels;
   final int? qualityScore;
   final bool? requiresNetwork;
   final bool isInstalled;
 
   String get selectionLabel {
-    if (metadataLabels.isEmpty) {
+    final details = [
+      ?personaLabel,
+      if (userPersonaLabel != null) 'Your label',
+      ...metadataLabels.where((label) => !personaTypes.contains(label)),
+    ];
+    if (details.isEmpty) {
       return label;
     }
-    return '$label • ${metadataLabels.join(' • ')}';
+    return '$label • ${details.join(' • ')}';
   }
 
   String get detailsLabel {
-    final details = [?personaLabel, if (locale.isNotEmpty) locale, name];
+    final details = [
+      personaDisplayLabel,
+      if (userPersonaLabel != null) 'Your label',
+      if (locale.isNotEmpty) locale,
+      name,
+    ];
     return details.join(' • ');
   }
 
-  factory VoiceModel.fromMap(Map<String, dynamic> map) {
+  VoiceModel withUserPersonaLabel(String? value) {
+    if (value != null && !personaTypes.contains(value)) {
+      throw ArgumentError.value(value, 'value', 'Unsupported voice type');
+    }
+    return VoiceModel(
+      name: name,
+      locale: locale,
+      label: label,
+      personaLabel: reportedPersonaLabel,
+      userPersonaLabel: value,
+      metadataLabels: metadataLabels,
+      qualityScore: qualityScore,
+      requiresNetwork: requiresNetwork,
+      isInstalled: isInstalled,
+    );
+  }
+
+  factory VoiceModel.fromMap(
+    Map<String, dynamic> map, {
+    Set<String>? usedNames,
+  }) {
     final rawName = (map['name'] ?? map['voice'] ?? 'Unknown voice').toString();
     final rawLocale = (map['locale'] ?? map['language'] ?? '').toString();
-    final segments = rawName
-        .split(RegExp(r'[-_,]'))
-        .map((part) => part.trim())
-        .where((part) => part.isNotEmpty)
-        .toList();
-    final localePart = rawLocale.isEmpty ? 'Unknown locale' : rawLocale;
-    final label = [
-      if (segments.isNotEmpty) segments.first,
-      if (segments.length > 1) ...segments.skip(1).take(2),
-      localePart,
-    ].join(', ');
+    final label = VoiceNames.android(rawName, rawLocale, usedNames: usedNames);
     final personaLabel = _extractPersonaLabel(map, rawName);
     final metadataLabels = <String>[
       ?personaLabel,
@@ -73,11 +100,17 @@ class VoiceModel {
     Map<String, dynamic> map,
     String rawName,
   ) {
-    final explicitGender = _normalizePersonaValue(
-      map['gender']?.toString() ?? map['sex']?.toString(),
-    );
-    if (explicitGender != null) {
-      return explicitGender;
+    for (final key in ['gender', 'sex', 'voiceGender']) {
+      final explicitGender = _normalizePersonaValue(map[key]?.toString());
+      if (explicitGender != null) return explicitGender;
+    }
+
+    final featureGender = RegExp(
+      r'\b(?:gender|sex)\s*[:=]\s*(female|male|woman|man|f|m)\b',
+      caseSensitive: false,
+    ).firstMatch('${map['features']}');
+    if (featureGender != null) {
+      return _normalizePersonaValue(featureGender.group(1));
     }
 
     final ageHint = _normalizePersonaValue(
@@ -87,17 +120,19 @@ class VoiceModel {
       return ageHint;
     }
 
-    final loweredName = rawName.toLowerCase();
-    if (loweredName.contains('female') || loweredName.contains('woman')) {
+    return _personaNameHint(rawName.toLowerCase());
+  }
+
+  static String? _personaNameHint(String value) {
+    if (RegExp(r'(?:^|[^a-z])(?:female|woman)(?=$|[^a-z])').hasMatch(value)) {
       return 'Female';
     }
-    if (loweredName.contains('male') || loweredName.contains('man')) {
+    if (RegExp(r'(?:^|[^a-z])(?:male|man)(?=$|[^a-z])').hasMatch(value)) {
       return 'Male';
     }
-    if (loweredName.contains('child') ||
-        loweredName.contains('kid') ||
-        loweredName.contains('boy') ||
-        loweredName.contains('girl')) {
+    if (RegExp(
+      r'(?:^|[^a-z])(?:child|kid|boy|girl)(?=$|[^a-z])',
+    ).hasMatch(value)) {
       return 'Child';
     }
     return null;
@@ -154,19 +189,13 @@ class VoiceModel {
     if (normalized.isEmpty) {
       return null;
     }
-    if (normalized.contains('female') || normalized == 'f') {
+    if (normalized == 'f') {
       return 'Female';
     }
-    if (normalized.contains('male') || normalized == 'm') {
+    if (normalized == 'm') {
       return 'Male';
     }
-    if (normalized.contains('child') ||
-        normalized.contains('kid') ||
-        normalized.contains('boy') ||
-        normalized.contains('girl')) {
-      return 'Child';
-    }
-    return null;
+    return _personaNameHint(normalized);
   }
 
   static String? _normalizeMetadataValue(dynamic raw) {

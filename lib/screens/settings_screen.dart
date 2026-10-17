@@ -6,6 +6,7 @@ import '../services/tts_service.dart';
 import '../widgets/tts_settings_panel.dart';
 import '../widgets/offline_voice_panel.dart';
 import '../widgets/reader_consumer.dart';
+import '../widgets/playback_status.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -75,6 +76,20 @@ class SettingsScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  ListenableBuilder(
+                    listenable: ttsService,
+                    builder: (context, _) => !ttsService.isBuffering
+                        ? const SizedBox.shrink()
+                        : Padding(
+                            padding: const EdgeInsets.only(bottom: 16),
+                            child: Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: PlaybackStatus(service: ttsService),
+                              ),
+                            ),
+                          ),
+                  ),
                   if (ttsService.supportsOfflineVoice) ...[
                     OfflineVoicePanel(service: ttsService),
                     const SizedBox(height: 16),
@@ -93,6 +108,9 @@ class SettingsScreen extends StatelessWidget {
                     selectedLanguage: ttsService.selectedLanguage,
                     selectedVoice: ttsService.selectedVoice,
                     voices: ttsService.voices,
+                    onVoiceTypeChanged: ttsService.canLabelAndroidVoices
+                        ? ttsService.setVoiceTypeLabel
+                        : null,
                     rate: ttsService.speechRate,
                     pitch: ttsService.pitch,
                     volume: ttsService.volume,

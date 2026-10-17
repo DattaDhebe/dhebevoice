@@ -11,6 +11,8 @@ class PlayerControls extends StatelessWidget {
     this.compactIconsOnly = false,
     this.wrapInSafeArea = true,
     this.enabled = true,
+    this.status,
+    this.stopEnabled,
   });
 
   final bool isPlaying;
@@ -21,6 +23,8 @@ class PlayerControls extends StatelessWidget {
   final bool compactIconsOnly;
   final bool wrapInSafeArea;
   final bool enabled;
+  final Widget? status;
+  final bool? stopEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -71,22 +75,37 @@ class PlayerControls extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.outlineVariant),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          button(
-            canResume ? 'Resume' : 'Play',
-            Icons.play_arrow_rounded,
-            enabled && !isPlaying ? onPlay : null,
-            primary: true,
+          if (status != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+              child: status!,
+            ),
+          Row(
+            children: [
+              button(
+                canResume ? 'Resume' : 'Play',
+                Icons.play_arrow_rounded,
+                enabled && !isPlaying ? onPlay : null,
+                primary: true,
+              ),
+              const SizedBox(width: 8),
+              button(
+                'Pause',
+                Icons.pause_rounded,
+                enabled && isPlaying ? onPause : null,
+                primary: isPlaying,
+              ),
+              const SizedBox(width: 8),
+              button(
+                'Stop',
+                Icons.stop_rounded,
+                (stopEnabled ?? enabled) ? onStop : null,
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          button(
-            'Pause',
-            Icons.pause_rounded,
-            enabled && isPlaying ? onPause : null,
-          ),
-          const SizedBox(width: 8),
-          button('Stop', Icons.stop_rounded, enabled ? onStop : null),
         ],
       ),
     );

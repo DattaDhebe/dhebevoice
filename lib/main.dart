@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'screens/home_screen.dart';
+import 'widgets/speech_preparation.dart';
 import 'services/audio_handler_controller.dart';
 import 'services/file_import_service.dart';
 import 'services/novel_import_controller.dart';
@@ -165,7 +166,7 @@ class TextReaderApp extends StatelessWidget {
             theme: _lightTheme,
             darkTheme: _darkTheme,
             themeMode: controller.themeMode,
-            home: const HomeScreen(),
+            home: const SpeechPreparationCoordinator(child: HomeScreen()),
           );
         },
       ),

@@ -1,0 +1,8 @@
+<en-US>
+Added friendly voice names and clearer language selection.
+Improved narration consistency, preparation progress, and playback controls.
+Voice and language changes now apply at the next speech segment without manually restarting playback.
+Added optional whole-chapter audio preparation and improved background preloading.
+Fixed a web-import dialog error and improved layouts on smaller screens.
+Supertonic generation speed depends on your device; buffering may still occur.
+</en-US>

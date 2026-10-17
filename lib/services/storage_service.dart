@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 class StorageService {
@@ -21,6 +23,9 @@ class StorageService {
 
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
+    if (_prefs.getInt('reader_neural_steps') == 3) {
+      await _prefs.setInt('reader_neural_steps', 5);
+    }
   }
 
   String get text => _prefs.getString(_textKey) ?? '';
@@ -45,6 +50,38 @@ class StorageService {
       _prefs.getString('voice_${provider}_name');
   String? providerVoiceLocale(String provider) =>
       _prefs.getString('voice_${provider}_locale');
+  String _voiceTypeKey(String engine, String name, String locale) =>
+      'reader_voice_type_${jsonEncode([engine, name, locale])}';
+
+  String? voiceTypeLabel(String engine, String name, String locale) {
+    final value = _prefs.get(_voiceTypeKey(engine, name, locale));
+    return value is String && const {'Female', 'Male', 'Child'}.contains(value)
+        ? value
+        : null;
+  }
+
+  Future<void> saveVoiceTypeLabel(
+    String engine,
+    String name,
+    String locale,
+    String? value,
+  ) async {
+    if (engine.isEmpty ||
+        name.isEmpty ||
+        locale.isEmpty ||
+        (value != null && !const {'Female', 'Male', 'Child'}.contains(value))) {
+      throw ArgumentError(
+        'A valid engine, voice, language, and voice type are required.',
+      );
+    }
+    final key = _voiceTypeKey(engine, name, locale);
+    if (value == null) {
+      await _prefs.remove(key);
+    } else {
+      await _prefs.setString(key, value);
+    }
+  }
+
   bool isOnlineVoiceApproved(String name, String locale) =>
       _prefs.getString('approved_online_voice') == '$locale|$name';
   Future<void> approveOnlineVoice(String name, String locale) =>
@@ -52,6 +89,13 @@ class StorageService {
   double get rate => _prefs.getDouble(_rateKey) ?? 0.48;
   double get pitch => _prefs.getDouble(_pitchKey) ?? 1.0;
   double get volume => _prefs.getDouble(_volumeKey) ?? 1.0;
+  int get neuralSteps => 5;
+  Future<void> saveNeuralSteps(int value) =>
+      _prefs.setInt('reader_neural_steps', value);
+  bool get prepareNeuralChapter =>
+      _prefs.getBool('reader_prepare_neural_chapter') ?? false;
+  Future<void> savePrepareNeuralChapter(bool value) =>
+      _prefs.setBool('reader_prepare_neural_chapter', value);
   int get position => _prefs.getInt(_positionKey) ?? 0;
   String? get activeNovelId => _prefs.getString(_activeNovelIdKey);
   int get activeChapterIndex => _prefs.getInt(_activeChapterIndexKey) ?? 0;
@@ -107,6 +151,8 @@ class StorageService {
     await _prefs.remove(_rateKey);
     await _prefs.remove(_pitchKey);
     await _prefs.remove(_volumeKey);
+    await _prefs.remove('reader_neural_steps');
+    await _prefs.remove('reader_prepare_neural_chapter');
   }
 
   Future<void> saveActiveNovelId(String? value) async {

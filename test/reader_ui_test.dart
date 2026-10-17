@@ -104,6 +104,7 @@ Future<void> _withReader(
   String? sharedUrl,
 }) async {
   debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+  late FlutterTts engine;
   SharedPreferences.setMockInitialValues({'reader_home_guide_seen': true});
   ReceiveSharingIntent.setMockValues(
     initialMedia: sharedUrl == null
@@ -112,14 +113,18 @@ Future<void> _withReader(
     mediaStream: const Stream.empty(),
   );
   final messenger = tester.binding.defaultBinaryMessenger;
-  messenger.setMockMethodCallHandler(
-    const MethodChannel('flutter_tts'),
-    (call) async => call.method == 'getVoices'
+  messenger.setMockMethodCallHandler(const MethodChannel('flutter_tts'), (
+    call,
+  ) async {
+    if (call.method == 'speak') {
+      Future.microtask(() => engine.startHandler?.call());
+    }
+    return call.method == 'getVoices'
         ? [
             {'name': 'en-in-x-ene-local', 'locale': 'en-IN'},
           ]
-        : 1,
-  );
+        : 1;
+  });
   messenger.setMockMethodCallHandler(
     const MethodChannel('com.ryanheise.audio_session'),
     (_) async => null,
@@ -128,7 +133,7 @@ Future<void> _withReader(
   await storage.initialize();
   final theme = ThemeController(storageService: storage);
   await theme.initialize();
-  final engine = FlutterTts();
+  engine = FlutterTts();
   final tts = TtsService(
     storageService: storage,
     fileImportService: FileImportService(),

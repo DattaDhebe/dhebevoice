@@ -8,20 +8,20 @@ import ai.onnxruntime.OrtSession
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.text.Normalizer
-import java.util.Random
 import kotlin.math.ceil
 
-class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
+class SupertonicSynthesizer(private val directory: File, intraOpThreads: Int = 2,
+    useXnnpack: Boolean = false) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
     private val sessions = mutableListOf<OrtSession>()
+    private val sessionOptions = OrtSession.SessionOptions()
     private val config = JSONObject(File(directory, "onnx/tts.json").readText())
     private val indexer = JSONArray(File(directory, "onnx/unicode_indexer.json").readText())
     private val sampleRate = config.getJSONObject("ae").getInt("sample_rate")
+    private var closed = false
     @Volatile private var activeRun: OrtSession.RunOptions? = null
     private data class StyleValues(val shape: LongArray, val values: FloatArray)
     private var cachedVoice: String? = null
@@ -50,13 +50,16 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
 
     init {
         try {
-            OrtSession.SessionOptions().use { options ->
-                options.setIntraOpNumThreads(2)
-                options.setInterOpNumThreads(1)
-                options.setMemoryPatternOptimization(false)
-                for (name in listOf("duration_predictor", "text_encoder", "vector_estimator", "vocoder")) {
-                    sessions.add(env.createSession(File(directory, "onnx/$name.onnx").path, options))
-                }
+            require(intraOpThreads in 1..4)
+            sessionOptions.setIntraOpNumThreads(if (useXnnpack) 1 else intraOpThreads)
+            sessionOptions.setInterOpNumThreads(1)
+            sessionOptions.setMemoryPatternOptimization(false)
+            if (useXnnpack) {
+                sessionOptions.addConfigEntry("session.intra_op.allow_spinning", "0")
+                sessionOptions.addXnnpack(mapOf("intra_op_num_threads" to intraOpThreads.toString()))
+            }
+            for (name in listOf("duration_predictor", "text_encoder", "vector_estimator", "vocoder")) {
+                sessions.add(env.createSession(File(directory, "onnx/$name.onnx").path, sessionOptions))
             }
         } catch (error: Throwable) {
             close()
@@ -66,10 +69,12 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
 
     @Synchronized fun cancel() { activeRun?.setTerminate(true) }
 
-    fun synthesize(text: String, language: String, voice: String, speed: Float, output: File, isCancelled: () -> Boolean) {
+    fun synthesize(text: String, language: String, voice: String, speed: Float, output: File, steps: Int = 5,
+        onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }, isCancelled: () -> Boolean) {
         require(Regex("[FM][1-5]").matches(voice))
         require(language in languages)
         require(text.length <= 300)
+        require(steps == 3 || steps == 5)
         val owned = mutableListOf<AutoCloseable>()
         fun <T : AutoCloseable> own(item: T): T { owned.add(item); return item }
         fun checkCancelled() { check(!isCancelled()) { "Cancelled" } }
@@ -77,6 +82,7 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
         synchronized(this) { activeRun = options }
         try {
             checkCancelled()
+            onProgress(0, steps + 4, "Preparing text")
             val normalized = normalize(text, language)
             val points = normalized.codePoints().toArray()
             val ids = LongArray(points.size) { i ->
@@ -100,18 +106,19 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
             }
             require(duration.isFinite() && duration > 0 && duration <= 60) { "Invalid audio duration" }
             checkCancelled()
+            onProgress(1, steps + 4, "Encoding text")
             val embedding = own(sessions[1].run(mapOf("text_ids" to textIds, "style_ttl" to ttlStyle, "text_mask" to textMask), options))
+            onProgress(2, steps + 4, "Refining voice")
             val compress = config.getJSONObject("ttl").getInt("chunk_compress_factor")
             val dim = config.getJSONObject("ttl").getInt("latent_dim") * compress
             val chunk = config.getJSONObject("ae").getInt("base_chunk_size") * compress
             val length = ceil((duration * sampleRate).toInt().toDouble() / chunk).toInt()
             require(length in 1..1000)
             val shape = longArrayOf(1, dim.toLong(), length.toLong())
-            val random = Random()
-            var latent = FloatArray(dim * length) { random.nextGaussian().toFloat() }
+            var latent = SpeechLatentNoise.create(voice, language, dim, length)
             val latentMask = own(tensor(FloatArray(length) { 1f }, longArrayOf(1, 1, length.toLong())))
-            val total = own(tensor(floatArrayOf(5f), longArrayOf(1)))
-            for (step in 0 until 5) {
+            val total = own(tensor(floatArrayOf(steps.toFloat()), longArrayOf(1)))
+            for (step in 0 until steps) {
                 checkCancelled()
                 tensor(latent, shape).use { noise ->
                     tensor(floatArrayOf(step.toFloat()), longArrayOf(1)).use { current ->
@@ -125,20 +132,19 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
                         }
                     }
                 }
+                onProgress(step + 3, steps + 4, "Refining voice (${step + 1} of $steps)")
             }
             checkCancelled()
+            onProgress(steps + 2, steps + 4, "Creating audio")
             tensor(latent, shape).use { finalLatent ->
                 sessions[3].run(mapOf("latent" to finalLatent), options).use { result ->
                     checkCancelled()
                     val samples = (result[0] as OnnxTensor).floatBuffer
                     val count = minOf((duration * sampleRate).toInt(), samples.remaining())
                     require(count > 0)
-                    val bytes = ByteBuffer.allocate(44 + count * 2).order(ByteOrder.LITTLE_ENDIAN)
-                    bytes.put("RIFF".toByteArray()).putInt(36 + count * 2).put("WAVEfmt ".toByteArray())
-                    bytes.putInt(16).putShort(1).putShort(1).putInt(sampleRate).putInt(sampleRate * 2)
-                    bytes.putShort(2).putShort(16).put("data".toByteArray()).putInt(count * 2)
-                    repeat(count) { bytes.putShort((samples.get().coerceIn(-1f, 1f) * 32767).toInt().toShort()) }
-                    output.writeBytes(bytes.array())
+                    onProgress(steps + 3, steps + 4, "Saving audio")
+                    output.writeBytes(SpeechPcm.wav(samples, count, sampleRate))
+                    onProgress(steps + 4, steps + 4, "Opening audio")
                 }
             }
         } finally {
@@ -148,8 +154,11 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
     }
 
     override fun close() {
+        if (closed) return
+        closed = true
         sessions.forEach { it.close() }
         sessions.clear()
+        sessionOptions.close()
         cachedVoice = null
         cachedStyle = emptyMap()
     }

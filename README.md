@@ -67,13 +67,23 @@ Import behavior and limits:
 - Headset, notification, and in-app controls share transport state. Newer Play/Pause/Stop commands cancel stale work; chapter transitions retain the media session, and skipping while paused stays paused.
 - A 15, 30, 45, or 60-minute sleep timer pauses without resetting your place. It continues across chapters and manual pauses; Stop cancels it. The timer lasts for the current app session.
 - Playback controls stay visible in both full-reading views
-- Supertonic prepares one speech segment ahead while the current segment plays. This reduces conversion gaps without caching an entire book; startup and slower-device delays can still occur.
+- The player distinguishes preparing, playing, paused, and stopped states. Longer startup, segment, or voice-change waits open a preparation popup after 700 ms; Hide keeps preparing and Stop cancels. The popup closes automatically when speech starts and never opens while the app is in the background.
+- Neural preparation reports real text-encoding, refinement, and audio-writing stages, not an estimated completion time. Model loading and Android TTS waits use an indeterminate bar when measurable progress is unavailable.
+- Supertonic defaults to starting playback when the first segment is ready and generating future audio in the background. A rolling window covers up to eight upcoming segments and 1,200 text characters, including runs of short paragraphs. The first segment never waits for that window to finish; matching future audio is retained across handoffs. Quality stays at five steps and speech rate is not changed. Generation slower than playback can still cause buffering on some phones.
+- Whole-chapter preparation remains an optional Settings switch for users who prefer a longer initial wait over conversion gaps. Its popup reports completed speech segments and refinement stages. No whole chapter is loaded into RAM.
+- Voice and language selections apply automatically at the next speech segment without pausing the reader. A language change keeps the same Supertonic narrator; it changes pronunciation, not the written text. A paused reader stays paused.
+- Supertonic also prepares the next audio decoder ahead of playback and trims only near-silent segment edges, keeping short consonant margins and internal pauses. Separate model requests can still vary in prosody; this is not a guarantee of cloud-level continuous narration.
+- Neural synthesis uses repeatable, narrator/language-specific Gaussian noise. Each latent channel keeps the same noise prefix across different paragraph lengths, removing per-request random rerolls without changing voice styles, speed, or refinement steps. Text-dependent delivery can still vary; this is not voice cloning or a promise of identical prosody.
+- Neural narration uses Quality (5 synthesis steps). The experimental 3-step Faster mode was removed because of reported distorted speech; saved 3-step selections migrate to Quality without changing speech rate. Neural Speech rate shows an actual multiplier, independently of generation quality. Paragraph handoffs do not wait for reading-position disk writes.
+- Chapter preparation is limited to 50,000 text characters, 400 speech segments, and 256 MB of temporary audio, with 64 MB free storage reserved. Stop deletes prepared audio. Pause during preparation cancels the job; Resume prepares it again. Voice, language, or rate changes prepare the remaining chapter at the next segment boundary. Selecting a different chapter or section prepares only that new selection. Preparation restarts after process death; this is not a persistent audiobook export.
 - Android voice settings include an online-only shortcut showing voices actually exposed by the installed engine. Online selection requires consent before text can be sent to the provider; no paid API key is used by DhebeVoice.
+- Choose voice uses distinct Supertonic nicknames (Asha, Mira, Clara, Iris, Nora, Arun, Theo, Rowan, Felix, Leo). Technical Android voice IDs get stable, gender-neutral friendly names, with duplicate names resolved within each language. Existing human-readable provider names are retained. Hold a card to see the original engine ID; saved selections and synthesis still use that ID, never the nickname. These are app display names, not new models or provider endorsements.
 
 ### Setup
 
 - First-run guide
-- Voice metadata labels
+- Voice cards show Female, Male, or Child when the provider reports it. Android voices without gender metadata show "Gender not provided" instead of a guess. Select a voice and use the label icon to save your own local voice-type label; "Use provider label" clears it. Personal labels are scoped to the engine, original voice ID, and language and do not change audio or interrupt playback.
+- Readable language/region names and a searchable avatar-card voice picker with explicit selection confirmation. Only installed voices are offered; online voices still require consent. Icons reflect known voice metadata, not invented voice identities.
 - Light, dark, and follow-device theme options
 - Consistent responsive layouts with narrow-screen and large-text widget tests
 
@@ -100,6 +110,8 @@ cd android
 ```
 
 The smoke test is skipped when this environment variable is absent. Device testing of neural narration, Bluetooth controls, and long background sessions is still required before a Play release.
+
+For a controlled CPU comparison, build `:app:assembleDebugAndroidTest` with `-PdhebeVoiceTestBuild=true`, install its test APK alongside DhebeVoice Test, and run `adb shell am instrument -w -e threads 2,4,2,4 com.dhebe.dhebevoice.test.test/com.dhebe.dhebevoice.SpeechRuntimeBenchmark`. Add `-e provider xnnpack` before the runner name to measure the optimized mobile backend instead of the default CPU backend. Pause the reader first: instrumentation restarts only the Test process. The benchmark requires the downloaded model pack, uses fixed sample text, five steps, M2 and normal speed, excludes model loading/warm-up from generation timings, and writes `cache/speech-runtime-benchmark-cpu.json` (or `-xnnpack.json`) inside the Test app. It never plays audio or reads the user's book. The runner refuses to run against the production package and is not included in the reader APK.
 
 ### Dependencies
 
@@ -129,6 +141,15 @@ flutter run
 ```
 
 For platform-specific setup, see the [Flutter documentation](https://docs.flutter.dev/get-started/install).
+
+To test alongside the Play-installed app without touching its books or settings:
+
+```powershell
+cd android
+.\gradlew.bat :app:assembleDebug -PdhebeVoiceTestBuild=true
+```
+
+This opt-in debug build uses package `com.dhebe.dhebevoice.test` and label `DhebeVoice Test`. Release builds and normal debug builds keep the original package. Debug-only `DhebeVoiceTTS` log messages record generation and handoff timings, never reading text.
 
 Run checks:
 

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../services/novel_import_controller.dart';
 import 'player_controls.dart';
+import 'playback_status.dart';
 import 'reader_consumer.dart';
 
 class ReaderViewDialog extends StatelessWidget {
@@ -57,7 +58,9 @@ class ReaderViewDialog extends StatelessWidget {
                       Expanded(
                         child: Text(
                           fullContent ? 'Reading content' : 'Now reading',
-                          style: theme.textTheme.titleLarge,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                       IconButton(
@@ -84,6 +87,11 @@ class ReaderViewDialog extends StatelessWidget {
                           style: theme.textTheme.titleMedium,
                         ),
                         const SizedBox(height: 12),
+                        if (media.textScaler.scale(1) <= 1.4 &&
+                            media.size.height >= 600) ...[
+                          SelectedVoiceLabel(service: service),
+                          const SizedBox(height: 12),
+                        ],
                         if (count > 0) ...[
                           Row(
                             children: [
@@ -164,6 +172,19 @@ class ReaderViewDialog extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   PlayerControls(
+                    status: service.isBuffering
+                        ? PlaybackStatus(
+                            service: service,
+                            compact:
+                                media.textScaler.scale(1) > 1.4 ||
+                                media.size.height < 600,
+                          )
+                        : null,
+                    stopEnabled:
+                        service.isPlaying ||
+                        service.isPaused ||
+                        service.isAdvancingChapter ||
+                        service.switchingVoice,
                     isPlaying: service.isPlaying || service.isAdvancingChapter,
                     canResume: service.isPaused || service.currentCharIndex > 0,
                     enabled:

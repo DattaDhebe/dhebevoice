@@ -2,6 +2,7 @@ import java.io.FileInputStream
 import java.util.Properties
 
 val keystoreProperties = Properties()
+val deviceTestBuild = providers.gradleProperty("dhebeVoiceTestBuild").orNull == "true"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use { stream ->
@@ -44,13 +45,21 @@ android {
 
     defaultConfig {
         applicationId = "com.dhebe.dhebevoice"
+        resValue("string", "app_name", "DhebeVoice")
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "com.dhebe.dhebevoice.SpeechRuntimeBenchmark"
     }
 
     buildTypes {
+        debug {
+            if (deviceTestBuild) {
+                applicationIdSuffix = ".test"
+                resValue("string", "app_name", "DhebeVoice Test")
+            }
+        }
         release {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -74,6 +83,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.microsoft.onnxruntime:onnxruntime:1.24.3")
+    androidTestImplementation("androidx.core:core-ktx:1.15.0")
 }
 
 // Older Android Studio JBRs bundle a Windows C++ runtime incompatible with ONNX.
