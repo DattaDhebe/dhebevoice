@@ -19,12 +19,12 @@ class OfflineTtsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var channel: MethodChannel
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    private lateinit var audioBuffer: SpeechAudioBuffer
     @Volatile private var synthesizer: SupertonicSynthesizer? = null
     @Volatile private var requestId: Int? = null
     private var directory: String? = null
     private var player: MediaPlayer? = null
     private var paused = false
-    private var audioFile: File? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var detached = false
     private var prepared = false
@@ -39,6 +39,20 @@ class OfflineTtsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
+        audioBuffer = SpeechAudioBuffer(
+            executor = worker,
+            createFile = { File.createTempFile("narration-", ".wav", context.cacheDir) },
+            render = { key, output, cancelled ->
+                if (directory != key.directory || synthesizer == null) {
+                    synthesizer?.close()
+                    synthesizer = null
+                    synthesizer = SupertonicSynthesizer(File(key.directory))
+                    directory = key.directory
+                }
+                synthesizer!!.synthesize(key.text, key.language, key.voice, key.speed, output, cancelled)
+            },
+            cancelRender = { synthesizer?.cancel() },
+        )
         channel = MethodChannel(binding.binaryMessenger, "com.dhebe.dhebevoice/offline_tts")
         channel.setMethodCallHandler(this)
     }
@@ -73,64 +87,34 @@ class OfflineTtsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val speed = call.argument<Double>("speed")!!.toFloat()
                     val volume = call.argument<Double>("volume")!!.toFloat().coerceIn(0f, 1f)
                     require(text.length <= 300 && text.isNotBlank())
-                    stop()
+                    require(speed.isFinite() && speed in 0.5f..2f)
+                    val nextText = call.argument<String>("nextText")
+                    require(nextText == null || (nextText.isNotBlank() && nextText.length <= 300))
+                    val key = SpeechAudioKey(root.path, text, voice, language, speed)
+                    // Unlike Stop, a normal segment handoff retains matching lookahead audio.
+                    requestId = null
+                    main.removeCallbacks(heartbeat)
+                    releasePlayer()
+                    val audio = audioBuffer.take(key, nextText?.let { key.copy(text = it) })
                     requestId = id
                     paused = false
                     playbackVolume = volume
                     main.post(heartbeat)
                     wakeLock = (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
                         .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DhebeVoice:OfflineTts").apply { acquire(240000) }
-                    val output = File.createTempFile("narration-", ".wav", context.cacheDir)
-                    audioFile = output
-                    worker.execute {
-                        try {
-                            if (requestId != id) { output.delete(); return@execute }
-                            if (directory != root.path || synthesizer == null) {
-                                synthesizer?.close()
-                                synthesizer = null
-                                synthesizer = SupertonicSynthesizer(root)
-                                directory = root.path
-                            }
-                            synthesizer!!.synthesize(text, language, voice, speed, output) { requestId != id }
-                            main.post {
-                                if (requestId != id || detached) { output.delete(); return@post }
-                                try {
-                                    player = MediaPlayer().apply {
-                                        setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
-                                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                                        setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK)
-                                        setVolume(playbackVolume, playbackVolume)
-                                        setDataSource(output.path)
-                                        setOnCompletionListener {
-                                            finish(id, "completed")
-                                        }
-                                        setOnErrorListener { _, _, _ ->
-                                            finish(id, "error", "Offline audio could not play. Try Android voices.")
-                                            true
-                                        }
-                                        setOnPreparedListener {
-                                            prepared = true
-                                            if (requestId == id && !paused) { start(); event(id, "started") }
-                                            releaseWakeLock()
-                                        }
-                                        prepareAsync()
-                                    }
-                                } catch (_: Exception) {
-                                    finish(id, "error", "Offline audio could not start.")
-                                }
-                            }
-                        } catch (_: Throwable) {
-                            output.delete()
-                            main.post {
-                                if (requestId == id) {
-                                    finish(id, "error", "Offline voice could not generate audio. Use shorter text or switch to Android voices.")
-                                }
+                    audio.ready.whenComplete { output, error ->
+                        main.post {
+                            if (requestId != id || detached || audio.cancelled) return@post
+                            if (error != null) {
+                                finish(id, "error", "Offline voice could not generate audio. Use shorter text or switch to Android voices.")
+                            } else {
+                                playAudio(id, output)
                             }
                         }
                     }
                     result.success(true)
                 }
-                "pause" -> { paused = true; player?.let { if (it.isPlaying) it.pause() }; result.success(null) }
+                "pause" -> { paused = true; player?.let { if (prepared && it.isPlaying) it.pause() }; result.success(null) }
                 "resume" -> {
                     val id = requestId
                     paused = false
@@ -152,7 +136,36 @@ class OfflineTtsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 else -> result.notImplemented()
             }
-        } catch (_: Exception) { result.error("offline_tts", "Offline voice operation failed.", null) }
+        } catch (_: Exception) {
+            if (call.method == "speak") stop()
+            result.error("offline_tts", "Offline voice operation failed.", null)
+        }
+    }
+
+    private fun playAudio(id: Int, output: File) {
+        try {
+            player = MediaPlayer().apply {
+                setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK)
+                setVolume(playbackVolume, playbackVolume)
+                setDataSource(output.path)
+                setOnCompletionListener { finish(id, "completed") }
+                setOnErrorListener { _, _, _ ->
+                    finish(id, "error", "Offline audio could not play. Try Android voices.")
+                    true
+                }
+                setOnPreparedListener {
+                    if (requestId != id || player !== it) return@setOnPreparedListener
+                    prepared = true
+                    if (!paused) { start(); event(id, "started") }
+                    releaseWakeLock()
+                }
+                prepareAsync()
+            }
+        } catch (_: Exception) {
+            finish(id, "error", "Offline audio could not start.")
+        }
     }
 
     private fun finish(id: Int, type: String, message: String? = null) {
@@ -161,19 +174,19 @@ class OfflineTtsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         requestId = null
         main.removeCallbacks(heartbeat)
         releasePlayer()
+        if (type == "completed") audioBuffer.releaseCurrent() else audioBuffer.clear()
     }
     private fun releaseWakeLock() { wakeLock?.let { if (it.isHeld) it.release() }; wakeLock = null }
     private fun releasePlayer() {
         prepared = false
         player?.release(); player = null
-        audioFile?.delete(); audioFile = null
         releaseWakeLock()
     }
     private fun stop() {
         requestId = null
         main.removeCallbacks(heartbeat)
-        synthesizer?.cancel()
         releasePlayer()
+        audioBuffer.clear()
     }
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         detached = true

@@ -7,14 +7,13 @@ import '../models/novel_book.dart';
 import 'novel_import_controller.dart';
 import 'tts_service.dart';
 
-class ReaderAudioHandler extends BaseAudioHandler
-    with QueueHandler, SeekHandler {
+class ReaderAudioHandler extends BaseAudioHandler {
   ReaderAudioHandler({
     required TtsService ttsService,
     required NovelImportController novelImportController,
   }) : _ttsService = ttsService,
        _novelImportController = novelImportController {
-    _ttsService.addListener(_broadcastPlaybackState);
+    _ttsService.addListener(_broadcastReaderState);
     _novelImportController.addListener(_broadcastLibraryState);
     _broadcastLibraryState();
     _broadcastPlaybackState();
@@ -27,17 +26,26 @@ class ReaderAudioHandler extends BaseAudioHandler
   String? _lastBookTitle;
   int? _lastChapterIndex;
   String? _lastLanguage;
-  (ReaderPlaybackState, int, bool, bool)? _lastPlaybackSnapshot;
+  (ReaderPlaybackState, int, bool, bool, bool, bool, String?)?
+  _lastPlaybackSnapshot;
+  Future<void> _navigation = Future<void>.value();
+  int _commandRevision = 0;
 
   @override
-  Future<void> play() => _ttsService.play();
+  Future<void> play() {
+    _commandRevision++;
+    return _ttsService.play();
+  }
 
   @override
-  Future<void> pause() => _ttsService.pause();
+  Future<void> pause() {
+    _commandRevision++;
+    return _ttsService.pause();
+  }
 
   @override
   Future<void> click([MediaButton button = MediaButton.media]) async {
-    final isPlaying = playbackState.value.playing;
+    final isPlaying = _ttsService.isPlaying || _ttsService.isAdvancingChapter;
     switch (button) {
       case MediaButton.media:
         if (isPlaying) {
@@ -57,49 +65,43 @@ class ReaderAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> stop() async {
-    _ttsService.setSleepTimer(null);
+    _commandRevision++;
     await _ttsService.stop();
-    playbackState.add(
-      playbackState.value.copyWith(
-        playing: false,
-        processingState: AudioProcessingState.idle,
-      ),
+  }
+
+  @override
+  Future<void> skipToNext() =>
+      _navigate(() => _novelImportController.goToNextChapter());
+
+  @override
+  Future<void> skipToPrevious() =>
+      _navigate(() => _novelImportController.goToPreviousChapter());
+
+  @override
+  Future<void> skipToQueueItem(int index) => _navigate(() async {
+    final book = _novelImportController.activeNovel;
+    if (book == null || index < 0 || index >= book.chapters.length) return;
+    await _novelImportController.selectChapter(
+      index,
+      resumePlayback: _ttsService.isPlaying || _ttsService.isAdvancingChapter,
     );
+  });
+
+  Future<void> _navigate(Future<void> Function() action) {
+    final revision = _commandRevision;
+    final operation = _navigation.then((_) async {
+      if (revision == _commandRevision) await action();
+    });
+    _navigation = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
   }
 
-  @override
-  Future<void> skipToNext() async {
-    final canAdvance =
-        _novelImportController.activeNovel != null &&
-        _novelImportController.activeChapterIndex <
-            _novelImportController.activeNovel!.chapters.length - 1;
-    if (!canAdvance) {
-      return;
-    }
-
-    final shouldResume = _ttsService.isPlaying;
-    final change = _novelImportController.goToNextChapter();
-    final session = _ttsService.playbackSessionId;
-    await change;
-    if (shouldResume && session == _ttsService.playbackSessionId) {
-      await _ttsService.play();
-    }
-  }
-
-  @override
-  Future<void> skipToPrevious() async {
-    if (_novelImportController.activeNovel == null ||
-        _novelImportController.activeChapterIndex <= 0) {
-      return;
-    }
-
-    final shouldResume = _ttsService.isPlaying;
-    final change = _novelImportController.goToPreviousChapter();
-    final session = _ttsService.playbackSessionId;
-    await change;
-    if (shouldResume && session == _ttsService.playbackSessionId) {
-      await _ttsService.play();
-    }
+  void _broadcastReaderState() {
+    _broadcastLibraryState();
+    _broadcastPlaybackState();
   }
 
   void _broadcastLibraryState() {
@@ -179,25 +181,32 @@ class ReaderAudioHandler extends BaseAudioHandler
       _novelImportController.activeChapterIndex,
       hasPrevious,
       hasNext,
+      _ttsService.isBuffering,
+      _ttsService.isAdvancingChapter,
+      _ttsService.errorMessage,
     );
     if (_lastPlaybackSnapshot == snapshot) return;
     _lastPlaybackSnapshot = snapshot;
 
     final controls = <MediaControl>[
       if (hasPrevious) MediaControl.skipToPrevious,
-      _ttsService.isPlaying ? MediaControl.pause : MediaControl.play,
+      (_ttsService.isPlaying || _ttsService.isAdvancingChapter)
+          ? MediaControl.pause
+          : MediaControl.play,
       MediaControl.stop,
       if (hasNext) MediaControl.skipToNext,
     ];
 
-    final processingState = switch (_ttsService.playbackState) {
-      ReaderPlaybackState.idle => AudioProcessingState.idle,
-      ReaderPlaybackState.stopped => AudioProcessingState.idle,
-      ReaderPlaybackState.playing ||
-      ReaderPlaybackState.paused => AudioProcessingState.ready,
-      ReaderPlaybackState.completed => AudioProcessingState.completed,
-      ReaderPlaybackState.error => AudioProcessingState.error,
-    };
+    final processingState = _ttsService.isBuffering
+        ? AudioProcessingState.buffering
+        : switch (_ttsService.playbackState) {
+            ReaderPlaybackState.idle => AudioProcessingState.idle,
+            ReaderPlaybackState.stopped => AudioProcessingState.idle,
+            ReaderPlaybackState.playing ||
+            ReaderPlaybackState.paused => AudioProcessingState.ready,
+            ReaderPlaybackState.completed => AudioProcessingState.completed,
+            ReaderPlaybackState.error => AudioProcessingState.error,
+          };
 
     final playPauseIndex = controls.indexWhere(
       (control) =>
@@ -216,17 +225,19 @@ class ReaderAudioHandler extends BaseAudioHandler
     playbackState.add(
       playbackState.value.copyWith(
         controls: controls,
-        systemActions: const {
+        systemActions: {
           MediaAction.play,
           MediaAction.pause,
           MediaAction.playPause,
           MediaAction.stop,
-          MediaAction.skipToNext,
-          MediaAction.skipToPrevious,
+          if (hasNext) MediaAction.skipToNext,
+          if (hasPrevious) MediaAction.skipToPrevious,
         },
         androidCompactActionIndices: compactActionIndices,
         processingState: processingState,
-        playing: _ttsService.isPlaying,
+        playing: _ttsService.isPlaying || _ttsService.isAdvancingChapter,
+        errorCode: processingState == AudioProcessingState.error ? 1 : null,
+        errorMessage: _ttsService.errorMessage,
         queueIndex: activeNovel == null
             ? 0
             : _novelImportController.activeChapterIndex,
@@ -236,7 +247,7 @@ class ReaderAudioHandler extends BaseAudioHandler
     if (!kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
         (_ttsService.isPlaying || _ttsService.isPaused)) {
-      unawaited(AudioService.androidForceEnableMediaButtons());
+      unawaited(_ttsService.refreshMediaButtons());
     }
   }
 }

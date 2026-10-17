@@ -22,6 +22,8 @@ class SupertonicSynthesizerTest {
                 assertEquals("RIFF", String(audio.copyOfRange(0, 4)))
                 assertTrue(audio.size > 44100)
                 assertTrue(audio.drop(44).any { it != 0.toByte() })
+                synth.synthesize("The next paragraph uses the same narrator.", "en", "F1", 1f, output) { false }
+                assertTrue(output.length() > 44100)
                 synth.synthesize("\u0928\u092e\u0938\u094d\u0924\u0947. \u092f\u0939 \u090f\u0915 \u0915\u0939\u093e\u0928\u0940 \u0939\u0948\u0964", "hi", "M3", 1f, output) { false }
                 assertTrue(output.length() > 44100)
                 try {

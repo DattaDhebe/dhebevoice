@@ -15,6 +15,8 @@ class ReaderConsumer extends StatelessWidget {
       selector: (_, service) => (
         service.text,
         service.playbackState,
+        service.isBuffering,
+        service.isAdvancingChapter,
         service.currentParagraphIndex,
         service.hasInitialized,
         service.switchingVoice,

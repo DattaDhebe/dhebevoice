@@ -17,6 +17,85 @@ void main() {
     requiresNetwork: true,
   );
 
+  Future<void> openPanel(
+    WidgetTester tester,
+    List<VoiceModel> voices, {
+    bool showOnlineVoices = true,
+    ValueChanged<VoiceModel?>? onSelected,
+  }) => tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: TtsSettingsPanel(
+            languages: const ['en-IN'],
+            selectedLanguage: 'en-IN',
+            selectedVoice: offline,
+            voices: voices,
+            rate: .48,
+            pitch: 1,
+            volume: 1,
+            showOnlineVoices: showOnlineVoices,
+            onLanguageChanged: (_) {},
+            onVoiceSelected: onSelected ?? (_) {},
+            onRateChanged: (_) {},
+            onPitchChanged: (_) {},
+            onVolumeChanged: (_) {},
+          ),
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('online shortcut finds other languages and still asks consent', (
+    tester,
+  ) async {
+    const otherLanguage = VoiceModel(
+      name: 'online-fr',
+      locale: 'fr-FR',
+      label: 'French narrator',
+      requiresNetwork: true,
+    );
+    VoiceModel? selected;
+    await openPanel(tester, const [
+      offline,
+      online,
+      otherLanguage,
+    ], onSelected: (voice) => selected = voice);
+    await tester.tap(find.text('Online Android voices (2)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Local narrator'), findsNothing);
+    expect(find.widgetWithText(ChoiceChip, 'Offline'), findsNothing);
+    await tester.tap(find.text('French narrator'));
+    await tester.pumpAndSettle();
+    expect(find.text('Use an online Android voice?'), findsOneWidget);
+    expect(selected, isNull);
+    await tester.tap(find.text('Use online voice'));
+    await tester.pumpAndSettle();
+    expect(selected, otherLanguage);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'no online voices gives setup guidance rather than inventing one',
+    (tester) async {
+      await openPanel(tester, const [offline]);
+      await tester.tap(find.text('Online Android voices (0)'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('No online voices are exposed'),
+        findsOneWidget,
+      );
+      expect(find.text('Local narrator'), findsNothing);
+    },
+  );
+
+  testWidgets('neural voice settings do not advertise Android online voices', (
+    tester,
+  ) async {
+    await openPanel(tester, const [offline], showOnlineVoices: false);
+    expect(find.textContaining('Online Android voices ('), findsNothing);
+  });
+
   testWidgets(
     'voice picker filters connectivity and confirms online selection',
     (tester) async {

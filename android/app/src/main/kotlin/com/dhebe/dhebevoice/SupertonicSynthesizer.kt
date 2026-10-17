@@ -23,6 +23,30 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
     private val indexer = JSONArray(File(directory, "onnx/unicode_indexer.json").readText())
     private val sampleRate = config.getJSONObject("ae").getInt("sample_rate")
     @Volatile private var activeRun: OrtSession.RunOptions? = null
+    private data class StyleValues(val shape: LongArray, val values: FloatArray)
+    private var cachedVoice: String? = null
+    private var cachedStyle: Map<String, StyleValues> = emptyMap()
+
+    private fun voiceStyle(voice: String): Map<String, StyleValues> {
+        if (cachedVoice == voice) return cachedStyle
+        val style = JSONObject(File(directory, "voice_styles/$voice.json").readText())
+        val parsed = listOf("style_dp", "style_ttl").associateWith { name ->
+            val item = style.getJSONObject(name)
+            val dims = item.getJSONArray("dims")
+            val values = mutableListOf<Float>()
+            fun flatten(array: JSONArray) {
+                for (i in 0 until array.length()) {
+                    val value = array.get(i)
+                    if (value is JSONArray) flatten(value) else values.add((value as Number).toFloat())
+                }
+            }
+            flatten(item.getJSONArray("data"))
+            StyleValues(LongArray(dims.length()) { dims.getLong(it) }, values.toFloatArray())
+        }
+        cachedVoice = voice
+        cachedStyle = parsed
+        return parsed
+    }
 
     init {
         try {
@@ -64,20 +88,10 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
                 OnnxTensor.createTensor(env, FloatBuffer.wrap(values), shape)
             val textIds = own(OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())))
             val textMask = own(tensor(FloatArray(ids.size) { 1f }, longArrayOf(1, 1, ids.size.toLong())))
-            val style = JSONObject(File(directory, "voice_styles/$voice.json").readText())
+            val style = voiceStyle(voice)
             fun styleTensor(name: String): OnnxTensor {
-                val item = style.getJSONObject(name)
-                val dims = item.getJSONArray("dims")
-                val shape = LongArray(dims.length()) { dims.getLong(it) }
-                val values = mutableListOf<Float>()
-                fun flatten(a: JSONArray) {
-                    for (i in 0 until a.length()) {
-                        val v = a.get(i)
-                        if (v is JSONArray) flatten(v) else values.add((v as Number).toFloat())
-                    }
-                }
-                flatten(item.getJSONArray("data"))
-                return own(tensor(values.toFloatArray(), shape))
+                val item = style.getValue(name)
+                return own(tensor(item.values, item.shape))
             }
             val dpStyle = styleTensor("style_dp")
             val ttlStyle = styleTensor("style_ttl")
@@ -133,7 +147,12 @@ class SupertonicSynthesizer(private val directory: File) : AutoCloseable {
         }
     }
 
-    override fun close() { sessions.forEach { it.close() }; sessions.clear() }
+    override fun close() {
+        sessions.forEach { it.close() }
+        sessions.clear()
+        cachedVoice = null
+        cachedStyle = emptyMap()
+    }
 
     companion object {
         val languages = setOf("en", "ko", "ja", "ar", "bg", "cs", "da", "de", "el", "es", "et", "fi", "fr", "hi", "hr", "hu", "id", "it", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi")

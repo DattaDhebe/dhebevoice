@@ -62,8 +62,13 @@ Import behavior and limits:
 - Background playback support
 - Lock-screen and notification media controls
 - Paragraph and chapter handoff support
+- Transient audio interruptions pause spoken content and resume only if the user has not paused or stopped it. Permanent focus loss requires manual Play, following [Android audio focus guidance](https://developer.android.com/media/optimize/audio-focus).
+- Disconnecting Bluetooth or wired headphones pauses playback; reconnecting alone never starts speech through a different output.
+- Headset, notification, and in-app controls share transport state. Newer Play/Pause/Stop commands cancel stale work; chapter transitions retain the media session, and skipping while paused stays paused.
 - A 15, 30, 45, or 60-minute sleep timer pauses without resetting your place. It continues across chapters and manual pauses; Stop cancels it. The timer lasts for the current app session.
 - Playback controls stay visible in both full-reading views
+- Supertonic prepares one speech segment ahead while the current segment plays. This reduces conversion gaps without caching an entire book; startup and slower-device delays can still occur.
+- Android voice settings include an online-only shortcut showing voices actually exposed by the installed engine. Online selection requires consent before text can be sent to the provider; no paid API key is used by DhebeVoice.
 
 ### Setup
 

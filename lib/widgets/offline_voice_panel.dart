@@ -116,12 +116,20 @@ class _OfflineVoicePanelState extends State<OfflineVoicePanel> {
                   items: [
                     const DropdownMenuItem(
                       value: false,
-                      child: Text('Android TTS'),
+                      child: Text(
+                        'Android TTS - device & online',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     if (store.ready)
                       const DropdownMenuItem(
                         value: true,
-                        child: Text('Supertonic 3 - offline neural'),
+                        child: Text(
+                          'Supertonic 3 - offline neural',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                   ],
                   onChanged: service.switchingVoice
@@ -178,7 +186,7 @@ class _OfflineVoicePanelState extends State<OfflineVoicePanel> {
                   ),
                 if (service.usesOfflineVoice)
                   const Text(
-                    'Pitch is fixed by the neural voice. Rate changes apply to the next speech segment. Playback position is saved at segment boundaries.',
+                    'The next segment is prepared while you listen to reduce pauses. Initial conversion and slower phones can still take time. Pitch is fixed; rate changes apply to the next segment. Playback position is saved at segment boundaries.',
                   ),
               ],
             ),

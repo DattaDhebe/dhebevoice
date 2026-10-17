@@ -20,6 +20,7 @@ class TtsSettingsPanel extends StatelessWidget {
     this.pitchEnabled = true,
     this.onRefreshVoices,
     this.onBestVoice,
+    this.showOnlineVoices = true,
     this.padding = const EdgeInsets.fromLTRB(20, 12, 20, 24),
   });
 
@@ -39,12 +40,61 @@ class TtsSettingsPanel extends StatelessWidget {
   final bool pitchEnabled;
   final VoidCallback? onRefreshVoices;
   final VoidCallback? onBestVoice;
+  final bool showOnlineVoices;
+
+  Future<void> _chooseVoice(
+    BuildContext context,
+    List<VoiceModel> choices, {
+    bool onlineOnly = false,
+  }) async {
+    final result = await showSearch<VoiceModel?>(
+      context: context,
+      delegate: _VoiceSearchDelegate(
+        voices: choices,
+        selectedVoice: selectedVoice,
+        onlineOnly: onlineOnly,
+      ),
+    );
+    if (result == null || !context.mounted) return;
+    if (result.requiresNetwork == true) {
+      final accepted = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Use an online Android voice?'),
+          content: const Text(
+            'This voice needs internet and may send reading text to your installed TTS provider. DhebeVoice does not use a paid TTS API or require an API key. Provider terms and mobile data charges still apply. Choose an offline voice to keep speech local.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Use online voice'),
+            ),
+          ],
+        ),
+      );
+      if (accepted != true || !context.mounted) return;
+    }
+    onVoiceSelected(result);
+  }
 
   @override
   Widget build(BuildContext context) {
     final languageVoices = voices
         .where((voice) => voice.locale == selectedLanguage)
         .toList();
+    final onlineVoices =
+        voices
+            .where(
+              (voice) => voice.isInstalled && voice.requiresNetwork == true,
+            )
+            .toList()
+          ..sort(
+            (a, b) => (b.qualityScore ?? 0).compareTo(a.qualityScore ?? 0),
+          );
 
     return Padding(
       padding: padding,
@@ -87,46 +137,7 @@ class TtsSettingsPanel extends StatelessWidget {
                   FilledButton.tonalIcon(
                     onPressed: languageVoices.isEmpty
                         ? null
-                        : () async {
-                            final result = await showSearch<VoiceModel?>(
-                              context: context,
-                              delegate: _VoiceSearchDelegate(
-                                voices: languageVoices,
-                                selectedVoice: selectedVoice,
-                              ),
-                            );
-                            if (result != null && context.mounted) {
-                              if (result.requiresNetwork == true) {
-                                final accepted = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text(
-                                      'Use an online Android voice?',
-                                    ),
-                                    content: const Text(
-                                      'This voice needs internet and may send reading text to your installed TTS provider. DhebeVoice does not use a paid TTS API or require an API key. Provider terms and mobile data charges still apply. Choose an offline voice to keep speech local.',
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(context, false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      FilledButton(
-                                        onPressed: () =>
-                                            Navigator.pop(context, true),
-                                        child: const Text('Use online voice'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (accepted != true || !context.mounted) {
-                                  return;
-                                }
-                              }
-                              onVoiceSelected(result);
-                            }
-                          },
+                        : () => _chooseVoice(context, languageVoices),
                     icon: const Icon(Icons.record_voice_over),
                     label: Text(
                       selectedVoice?.selectionLabel ?? 'Choose installed voice',
@@ -134,6 +145,23 @@ class TtsSettingsPanel extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  if (showOnlineVoices) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          _chooseVoice(context, onlineVoices, onlineOnly: true),
+                      icon: const Icon(Icons.cloud_outlined),
+                      label: Text(
+                        'Online Android voices (${onlineVoices.length})',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      onlineVoices.isEmpty
+                          ? 'Your current Android engine reports no online voices. Enable or update a speech engine such as Google Speech Recognition & Synthesis in device TTS settings, then reopen DhebeVoice.'
+                          : 'Browse online voices across all languages, ranked by engine-reported quality. No paid API key is used by DhebeVoice; provider terms and data charges apply.',
+                    ),
+                  ],
                   if (onRefreshVoices != null)
                     Wrap(
                       spacing: 8,
@@ -247,11 +275,16 @@ class _SettingSlider extends StatelessWidget {
 }
 
 class _VoiceSearchDelegate extends SearchDelegate<VoiceModel?> {
-  _VoiceSearchDelegate({required this.voices, required this.selectedVoice});
+  _VoiceSearchDelegate({
+    required this.voices,
+    required this.selectedVoice,
+    this.onlineOnly = false,
+  }) : _connection = ValueNotifier<String>(onlineOnly ? 'Online' : 'All');
 
   final List<VoiceModel> voices;
   final VoiceModel? selectedVoice;
-  final _connection = ValueNotifier<String>('All');
+  final bool onlineOnly;
+  final ValueNotifier<String> _connection;
 
   @override
   void dispose() {
@@ -295,7 +328,8 @@ class _VoiceSearchDelegate extends SearchDelegate<VoiceModel?> {
           child: Wrap(
             spacing: 8,
             children: [
-              for (final label in ['All', 'Offline', 'Online'])
+              for (final label
+                  in onlineOnly ? ['Online'] : ['All', 'Offline', 'Online'])
                 ChoiceChip(
                   label: Text(label),
                   selected: filter == label,
@@ -332,8 +366,16 @@ class _VoiceSearchDelegate extends SearchDelegate<VoiceModel?> {
     }).toList();
 
     if (filtered.isEmpty) {
-      return const Center(
-        child: Text('No installed voices match that search.'),
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            onlineOnly && voices.isEmpty
+                ? 'No online voices are exposed by your current Android TTS engine. Check device TTS settings, update the engine, then reopen DhebeVoice and refresh voices.'
+                : 'No installed voices match that search.',
+            textAlign: TextAlign.center,
+          ),
+        ),
       );
     }
 

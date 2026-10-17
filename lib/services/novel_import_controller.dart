@@ -415,7 +415,10 @@ class NovelImportController extends ChangeNotifier {
     );
   }
 
-  Future<void> selectChapter(int chapterIndex) async {
+  Future<void> selectChapter(
+    int chapterIndex, {
+    bool resumePlayback = false,
+  }) async {
     final novel = _activeNovel;
     if (novel == null ||
         chapterIndex < 0 ||
@@ -427,6 +430,7 @@ class NovelImportController extends ChangeNotifier {
       novel: novel,
       chapterIndex: chapterIndex,
       persistLastRead: true,
+      resumePlayback: resumePlayback,
     );
   }
 
@@ -472,14 +476,20 @@ class NovelImportController extends ChangeNotifier {
     if (_activeChapterIndex >= _activeNovel!.chapters.length - 1) {
       return;
     }
-    await selectChapter(_activeChapterIndex + 1);
+    await selectChapter(
+      _activeChapterIndex + 1,
+      resumePlayback: _ttsService.isPlaying || _ttsService.isAdvancingChapter,
+    );
   }
 
   Future<void> goToPreviousChapter() async {
     if (_activeNovel == null || _activeChapterIndex <= 0) {
       return;
     }
-    await selectChapter(_activeChapterIndex - 1);
+    await selectChapter(
+      _activeChapterIndex - 1,
+      resumePlayback: _ttsService.isPlaying || _ttsService.isAdvancingChapter,
+    );
   }
 
   Future<void> _updateLastReadChapter(String novelId, int chapterIndex) async {
@@ -532,19 +542,27 @@ class NovelImportController extends ChangeNotifier {
     required bool persistLastRead,
     bool stopPlayback = true,
     int? expectedPlaybackSession,
+    bool resumePlayback = false,
   }) async {
     final activation = ++_chapterActivationId;
+    var playbackSession =
+        expectedPlaybackSession ?? _ttsService.playbackSessionId;
     bool isCurrent() => activation == _chapterActivationId && !_disposed;
     await _saveReadingPosition();
     if (!isCurrent()) return;
-    if (expectedPlaybackSession != null &&
-        expectedPlaybackSession != _ttsService.playbackSessionId) {
+    if (playbackSession != _ttsService.playbackSessionId) {
       return;
     }
-    if (stopPlayback) await _ttsService.stop();
+    if (stopPlayback) {
+      final stopping = _ttsService.stop(
+        preserveSleepTimer: true,
+        keepAudioSession: resumePlayback || _ttsService.isPaused,
+      );
+      playbackSession = _ttsService.playbackSessionId;
+      await stopping;
+    }
     if (!isCurrent()) return;
-    if (expectedPlaybackSession != null &&
-        expectedPlaybackSession != _ttsService.playbackSessionId) {
+    if (playbackSession != _ttsService.playbackSessionId) {
       return;
     }
 
@@ -562,7 +580,9 @@ class NovelImportController extends ChangeNotifier {
     _activeChapterIndex = chapterIndex;
     notifyListeners();
     await textUpdate;
-    if (!isCurrent()) return;
+    if (!isCurrent() || playbackSession != _ttsService.playbackSessionId) {
+      return;
+    }
 
     await _storageService.saveActiveNovelId(novel.id);
     if (!isCurrent()) return;
@@ -573,6 +593,9 @@ class NovelImportController extends ChangeNotifier {
     }
     if (!isCurrent()) return;
     notifyListeners();
+    if (resumePlayback && playbackSession == _ttsService.playbackSessionId) {
+      await _ttsService.play();
+    }
   }
 
   Future<void> _saveReadingPosition() async {

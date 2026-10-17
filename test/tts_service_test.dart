@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -84,6 +86,12 @@ void main() {
   late TtsService service;
   late List<String> spoken;
   Completer<void>? queueBarrier;
+  Completer<void>? stopBarrier;
+  late List<String> nativeCalls;
+  late List<bool> focusChanges;
+  Future<bool> Function(bool active)? focusOverride;
+  var failPause = false;
+  late DateTime now;
   late MemoryLibrary library;
   late NovelImportController importer;
 
@@ -94,14 +102,25 @@ void main() {
     await storage.initialize();
     spoken = [];
     queueBarrier = null;
+    stopBarrier = null;
+    nativeCalls = [];
+    focusChanges = [];
+    focusOverride = null;
+    failPause = false;
+    now = DateTime(2026, 10, 17);
     messenger.setMockMethodCallHandler(sessionChannel, (_) async => null);
     messenger.setMockMethodCallHandler(ttsChannel, (call) async {
+      nativeCalls.add(call.method);
       if (call.method == 'getVoices') {
         return [
           {'name': 'en-in-x-ene-local', 'locale': 'en-IN'},
         ];
       }
       if (call.method == 'setQueueMode') await queueBarrier?.future;
+      if (call.method == 'stop') await stopBarrier?.future;
+      if (call.method == 'pause' && failPause) {
+        throw PlatformException(code: 'pause_failed');
+      }
       if (call.method == 'speak') {
         final arguments = call.arguments;
         spoken.add(
@@ -115,6 +134,11 @@ void main() {
       storageService: storage,
       fileImportService: FileImportService(),
       flutterTts: engine,
+      clock: () => now,
+      setAudioSessionActive: (active) async {
+        focusChanges.add(active);
+        return focusOverride == null ? true : await focusOverride!(active);
+      },
     );
     await service.initialize();
     library = MemoryLibrary();
@@ -144,6 +168,415 @@ void main() {
     engine.startHandler!();
     engine.continueHandler!();
     expect(service.playbackState, ReaderPlaybackState.stopped);
+  });
+
+  test('repeated Play is idempotent while audio focus is pending', () async {
+    await service.updateText('Story.');
+    final focus = Completer<bool>();
+    focusOverride = (active) async => active ? focus.future : true;
+    final playing = service.play();
+    await flushCallbacks();
+    expect(service.isPlaying, isTrue);
+    expect(service.isBuffering, isTrue);
+    await service.play();
+    focus.complete(true);
+    await playing;
+    expect(spoken, ['Story.']);
+    engine.startHandler!();
+    expect(service.isBuffering, isFalse);
+  });
+
+  test('Pause cancels Play before focus has been granted', () async {
+    await service.updateText('Story.');
+    final focus = Completer<bool>();
+    focusOverride = (active) async => active ? focus.future : true;
+    final playing = service.play();
+    await flushCallbacks();
+    final pausing = service.pause();
+    expect(service.isPaused, isTrue);
+    focus.complete(true);
+    await playing;
+    await pausing;
+    expect(spoken, isEmpty);
+    expect(focusChanges.last, isFalse);
+  });
+
+  test('Stop finishes before a newer Play takes focus', () async {
+    await service.updateText('Story.');
+    await service.play();
+    stopBarrier = Completer<void>();
+    final stopping = service.stop();
+    final playing = service.play();
+    expect(service.isPlaying, isTrue);
+    stopBarrier!.complete();
+    await stopping;
+    await playing;
+    expect(service.isPlaying, isTrue);
+    expect(spoken, ['Story.', 'Story.']);
+    expect(focusChanges.last, isTrue);
+  });
+
+  test(
+    'audio focus denial and platform failures do not strand Playing',
+    () async {
+      await service.updateText('Story.');
+      focusOverride = (active) async => !active;
+      await service.play();
+      expect(service.playbackState, ReaderPlaybackState.error);
+      expect(service.errorMessage, contains('audio focus'));
+      expect(spoken, isEmpty);
+      focusOverride = (active) async {
+        if (active) throw PlatformException(code: 'focus_failed');
+        return true;
+      };
+      await service.play();
+      expect(service.playbackState, ReaderPlaybackState.error);
+      expect(service.isBuffering, isFalse);
+    },
+  );
+
+  test('a transient interruption resumes once from the saved word', () async {
+    const text = 'First paragraph.';
+    await service.updateText(text);
+    await service.play();
+    engine.startHandler!();
+    engine.progressHandler!(text, 6, 15, 'paragraph');
+    await service.handleAudioInterruption(
+      AudioInterruptionEvent(true, AudioInterruptionType.pause),
+    );
+    expect(service.isPaused, isTrue);
+    await service.handleAudioInterruption(
+      AudioInterruptionEvent(false, AudioInterruptionType.pause),
+    );
+    await service.handleAudioInterruption(
+      AudioInterruptionEvent(false, AudioInterruptionType.pause),
+    );
+    expect(spoken, [text, 'paragraph.']);
+    expect(service.isPlaying, isTrue);
+  });
+
+  test(
+    'a notification interruption resumes rather than staying silent',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(true, AudioInterruptionType.duck),
+      );
+      expect(service.isPaused, isTrue);
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(false, AudioInterruptionType.duck),
+      );
+      expect(service.isPlaying, isTrue);
+      expect(spoken.length, 2);
+    },
+  );
+
+  for (final action in ['pause', 'stop', 'disconnect', 'permanent loss']) {
+    test('$action cancels automatic resume after an interruption', () async {
+      await service.updateText('Story.');
+      await service.play();
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      switch (action) {
+        case 'pause':
+          await service.pause();
+        case 'stop':
+          await service.stop();
+        case 'disconnect':
+          await service.handleAudioBecomingNoisy();
+        case 'permanent loss':
+          await service.handleAudioInterruption(
+            AudioInterruptionEvent(true, AudioInterruptionType.unknown),
+          );
+      }
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      expect(service.isPlaying, isFalse);
+      expect(spoken, ['Story.']);
+    });
+  }
+
+  test(
+    'permanent focus loss pauses active speech without auto-resume',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(true, AudioInterruptionType.unknown),
+      );
+      expect(service.isPaused, isTrue);
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      expect(spoken.length, 1);
+    },
+  );
+
+  test(
+    'Bluetooth disconnect falls back to Stop if native pause fails',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      nativeCalls.clear();
+      failPause = true;
+      await service.handleAudioBecomingNoisy();
+      expect(nativeCalls, containsAllInOrder(['pause', 'stop']));
+      expect(service.isPaused, isTrue);
+      expect(focusChanges.last, isFalse);
+      expect(service.errorMessage, isNull);
+    },
+  );
+
+  testWidgets('an unsolicited native pause never restarts on its own', (
+    tester,
+  ) async {
+    await service.updateText('Story.');
+    await service.play();
+    engine.startHandler!();
+    engine.pauseHandler!();
+    await tester.pump(const Duration(seconds: 5));
+    expect(service.isPaused, isTrue);
+    expect(spoken.length, 1);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('rapid headset toggles use current transport intent', () async {
+    await service.updateText('Story.');
+    final handler = ReaderAudioHandler(
+      ttsService: service,
+      novelImportController: importer,
+    );
+    final play = handler.click();
+    final pause = handler.click();
+    await play;
+    await pause;
+    expect(service.isPaused, isTrue);
+    expect(handler.playbackState.value.playing, isFalse);
+    await handler.click();
+    expect(service.isPlaying, isTrue);
+    await handler.pause();
+    await handler.pause();
+    expect(service.isPaused, isTrue);
+  });
+
+  test(
+    'background media Next plays the selected chapter and retains focus',
+    () async {
+      await importer.selectNovel('test-book');
+      final handler = ReaderAudioHandler(
+        ttsService: service,
+        novelImportController: importer,
+      );
+      await handler.play();
+      await service.handleAppLifecycleState(AppLifecycleState.paused);
+      focusChanges.clear();
+      final states = <PlaybackState>[];
+      final subscription = handler.playbackState.listen(states.add);
+      await handler.skipToNext();
+      await flushCallbacks();
+      expect(service.isPlaying, isTrue);
+      expect(spoken, ['First chapter.', 'Second chapter.']);
+      expect(focusChanges, isNot(contains(false)));
+      expect(
+        states,
+        isNot(
+          contains(
+            predicate<PlaybackState>(
+              (s) => s.processingState == AudioProcessingState.idle,
+            ),
+          ),
+        ),
+      );
+      expect(handler.mediaItem.value?.title, 'Second');
+      expect(
+        handler.playbackState.value.systemActions,
+        isNot(contains(MediaAction.skipToNext)),
+      );
+      await subscription.cancel();
+    },
+  );
+
+  test(
+    'media queue selection really changes chapters without starting paused audio',
+    () async {
+      await importer.selectNovel('test-book');
+      final handler = ReaderAudioHandler(
+        ttsService: service,
+        novelImportController: importer,
+      );
+      await handler.play();
+      await handler.pause();
+      await handler.skipToQueueItem(1);
+      expect(importer.activeChapterIndex, 1);
+      expect(service.isPlaying, isFalse);
+      expect(service.isPaused, isTrue);
+      expect(
+        handler.playbackState.value.processingState,
+        AudioProcessingState.ready,
+      );
+      expect(spoken, ['First chapter.']);
+      await handler.skipToQueueItem(-1);
+      await handler.skipToQueueItem(100);
+      expect(importer.activeChapterIndex, 1);
+      await handler.play();
+      await handler.skipToQueueItem(0);
+      expect(service.isPlaying, isTrue);
+      expect(spoken.last, 'First chapter.');
+    },
+  );
+
+  test('Pause cancels an in-flight media Next', () async {
+    await importer.selectNovel('test-book');
+    final handler = ReaderAudioHandler(
+      ttsService: service,
+      novelImportController: importer,
+    );
+    await handler.play();
+    storage.chapterBarrier = Completer<void>();
+    final next = handler.skipToNext();
+    await flushCallbacks();
+    await handler.pause();
+    storage.chapterBarrier!.complete();
+    await next;
+    expect(service.isPlaying, isFalse);
+    expect(spoken, ['First chapter.']);
+  });
+
+  test('chapter autoplay does not release focus between chapters', () async {
+    await importer.selectNovel('test-book');
+    await service.play();
+    focusChanges.clear();
+    engine.startHandler!();
+    engine.completionHandler!();
+    await flushCallbacks();
+    expect(spoken, ['First chapter.', 'Second chapter.']);
+    expect(focusChanges, isNot(contains(false)));
+  });
+
+  test(
+    'resuming at a completed paragraph advances instead of getting stuck',
+    () async {
+      await service.updateText('First.\n\nSecond.');
+      await service.play();
+      engine.startHandler!();
+      storage.positionBarrier = Completer<void>();
+      engine.completionHandler!();
+      final pausing = service.pause();
+      storage.positionBarrier!.complete();
+      await pausing;
+      await service.play();
+      expect(spoken, ['First.', 'Second.']);
+    },
+  );
+
+  testWidgets('in-app Stop cancels the sleep timer too', (tester) async {
+    service.setSleepTimer(const Duration(minutes: 15));
+    await service.stop();
+    final session = service.playbackSessionId;
+    await tester.pump(const Duration(minutes: 15));
+    expect(service.sleepTimerEndsAt, isNull);
+    expect(service.playbackSessionId, session);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets(
+    'a valid long utterance is not restarted without word callbacks',
+    (tester) async {
+      final text = List.filled(50, 'A quiet story continues.').join(' ');
+      await service.updateText(text);
+      await service.play();
+      engine.startHandler!();
+      now = now.add(const Duration(seconds: 16));
+      await tester.pump(const Duration(seconds: 16));
+      expect(spoken, [text]);
+      expect(service.isPlaying, isTrue);
+      await service.stop();
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets('a stalled Android engine is recovered while minimized', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    await service.updateText('Story.');
+    await service.play();
+    await service.handleAppLifecycleState(AppLifecycleState.paused);
+    now = now.add(const Duration(seconds: 16));
+    await tester.pump(const Duration(seconds: 16));
+    await tester.pump();
+    expect(spoken, ['Story.', 'Story.']);
+    await service.stop();
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('Pause at the chapter end can resume into the next chapter', () async {
+    await importer.selectNovel('test-book');
+    await service.play();
+    engine.startHandler!();
+    storage.positionBarrier = Completer<void>();
+    engine.completionHandler!();
+    final pausing = service.pause();
+    storage.positionBarrier!.complete();
+    await pausing;
+    await service.play();
+    await flushCallbacks();
+    expect(importer.activeChapterIndex, 1);
+    expect(spoken, ['First chapter.', 'Second chapter.']);
+    expect(service.isPlaying, isTrue);
+  });
+
+  test(
+    'media buffering remains active throughout delayed chapter autoplay',
+    () async {
+      await importer.selectNovel('test-book');
+      final handler = ReaderAudioHandler(
+        ttsService: service,
+        novelImportController: importer,
+      );
+      await handler.play();
+      engine.startHandler!();
+      expect(
+        handler.playbackState.value.processingState,
+        AudioProcessingState.ready,
+      );
+      storage.chapterBarrier = Completer<void>();
+      engine.completionHandler!();
+      await flushCallbacks();
+      expect(handler.playbackState.value.playing, isTrue);
+      expect(
+        handler.playbackState.value.processingState,
+        AudioProcessingState.buffering,
+      );
+      await handler.pause();
+      storage.chapterBarrier!.complete();
+      await flushCallbacks();
+      expect(handler.playbackState.value.playing, isFalse);
+      expect(spoken, ['First chapter.']);
+    },
+  );
+
+  test('queued media navigation is cancelled by Stop', () async {
+    await importer.selectNovel('test-book');
+    final handler = ReaderAudioHandler(
+      ttsService: service,
+      novelImportController: importer,
+    );
+    await handler.play();
+    storage.chapterBarrier = Completer<void>();
+    final next = handler.skipToNext();
+    await flushCallbacks();
+    final previous = handler.skipToPrevious();
+    await handler.stop();
+    storage.chapterBarrier!.complete();
+    await next;
+    await previous;
+    expect(importer.activeChapterIndex, 1);
+    expect(service.isPlaying, isFalse);
+    expect(spoken, ['First chapter.']);
   });
 
   testWidgets(

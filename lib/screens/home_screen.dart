@@ -629,12 +629,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final importer = context.read<NovelImportController>();
-    final ttsService = context.read<TtsService>();
-    final shouldResume = ttsService.isPlaying;
     await importer.goToPreviousChapter();
-    if (shouldResume) {
-      await ttsService.play();
-    }
   }
 
   Future<void> _skipToNextUsingBestAvailableController() async {
@@ -645,12 +640,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final importer = context.read<NovelImportController>();
-    final ttsService = context.read<TtsService>();
-    final shouldResume = ttsService.isPlaying;
     await importer.goToNextChapter();
-    if (shouldResume) {
-      await ttsService.play();
-    }
   }
 
   void _syncImportDialog(NovelImportController importer) {
@@ -843,7 +833,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         controlsReady &&
                         !ttsService.switchingVoice &&
                         ttsService.paragraphCount > 0,
-                    isPlaying: ttsService.isPlaying,
+                    isPlaying:
+                        ttsService.isPlaying || ttsService.isAdvancingChapter,
                     canResume:
                         ttsService.isPaused || ttsService.currentCharIndex > 0,
                     onPlay: () =>
@@ -1734,7 +1725,11 @@ class _NowReadingCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                ttsService.isPlaying
+                ttsService.isAdvancingChapter
+                    ? 'Loading next chapter...'
+                    : ttsService.isBuffering
+                    ? 'Preparing speech...'
+                    : ttsService.isPlaying
                     ? 'Playing'
                     : ttsService.isPaused
                     ? 'Paused - your place is saved'

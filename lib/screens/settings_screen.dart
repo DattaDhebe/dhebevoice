@@ -82,6 +82,7 @@ class SettingsScreen extends StatelessWidget {
                   TtsSettingsPanel(
                     key: ValueKey(ttsService.usesOfflineVoice),
                     pitchEnabled: !ttsService.usesOfflineVoice,
+                    showOnlineVoices: !ttsService.usesOfflineVoice,
                     onRefreshVoices: ttsService.usesOfflineVoice
                         ? null
                         : ttsService.refreshVoices,

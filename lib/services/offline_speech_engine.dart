@@ -45,6 +45,7 @@ class OfflineSpeechEngine {
     required String language,
     required double speed,
     required double volume,
+    String? nextText,
   }) async {
     final request = ++_requestId;
     active = true;
@@ -59,6 +60,7 @@ class OfflineSpeechEngine {
         'language': language,
         'speed': speed,
         'volume': volume,
+        'nextText': ?nextText,
       });
       if (request == _requestId && started != true) {
         active = false;

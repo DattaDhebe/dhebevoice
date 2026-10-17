@@ -65,6 +65,24 @@ void main() {
     expect(engine.generating, isFalse);
   });
 
+  test(
+    'passes only the optional lookahead segment to native playback',
+    () async {
+      await engine.speak(
+        directory: 'models',
+        text: 'Current paragraph.',
+        nextText: 'Next paragraph.',
+        voice: 'F1',
+        language: 'en',
+        speed: 1,
+        volume: .5,
+      );
+      expect(calls.last.arguments['nextText'], 'Next paragraph.');
+      await speak();
+      expect((calls.last.arguments as Map).containsKey('nextText'), isFalse);
+    },
+  );
+
   test('pause and resume retain the generated audio request', () async {
     expect(await speak(), isTrue);
     final id = calls.last.arguments['id'] as int;

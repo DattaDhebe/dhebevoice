@@ -17,8 +17,6 @@ import 'storage_service.dart';
 
 enum ReaderPlaybackState { idle, playing, paused, stopped, completed, error }
 
-enum _PauseOrigin { none, user, system }
-
 class TtsService extends ChangeNotifier {
   static const _defaultLanguage = 'en-IN';
   static const _defaultVoicePattern = 'en-in-x-ene-local';
@@ -34,16 +32,22 @@ class TtsService extends ChangeNotifier {
     FlutterTts? flutterTts,
     OfflineModelStore? modelStore,
     OfflineSpeechEngine? offlineEngine,
+    Future<bool> Function(bool active)? setAudioSessionActive,
+    DateTime Function()? clock,
   }) : _storageService = storageService,
        _fileImportService = fileImportService,
        _flutterTts = flutterTts ?? FlutterTts(),
        modelStore = modelStore ?? OfflineModelStore(),
-       _offlineEngine = offlineEngine;
+       _offlineEngine = offlineEngine,
+       _setAudioSessionActive = setAudioSessionActive,
+       _clock = clock ?? DateTime.now;
 
   final StorageService _storageService;
   final FileImportService _fileImportService;
   final FlutterTts _flutterTts;
   final OfflineModelStore modelStore;
+  final Future<bool> Function(bool active)? _setAudioSessionActive;
+  final DateTime Function() _clock;
   OfflineSpeechEngine? _offlineEngine;
   bool _useOfflineVoice = false;
   bool _switchingVoice = false;
@@ -81,6 +85,9 @@ class TtsService extends ChangeNotifier {
   bool _hasInitialized = false;
   bool _isRecoveringFromStall = false;
   bool _chunkStarted = false;
+  bool _acceptAndroidCallbacks = false;
+  bool _advancingChapter = false;
+  Future<void>? _transportOperation;
   bool _isDisposed = false;
   int? _completingSession;
   Future<void>? _initialization;
@@ -89,10 +96,8 @@ class TtsService extends ChangeNotifier {
   DateTime? _lastPlaybackActivityAt;
   Future<void> Function()? _playbackCompletedHandler;
   Timer? _playbackWatchdog;
-  Timer? _unexpectedPauseRecoveryTimer;
   Timer? _sleepTimer;
   DateTime? _sleepTimerEndsAt;
-  _PauseOrigin _pauseOrigin = _PauseOrigin.none;
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
 
   List<VoiceModel> get voices => _voices;
@@ -111,6 +116,8 @@ class TtsService extends ChangeNotifier {
 
   bool get isPlaying => _playbackState == ReaderPlaybackState.playing;
   bool get isPaused => _playbackState == ReaderPlaybackState.paused;
+  bool get isAdvancingChapter => _advancingChapter;
+  bool get isBuffering => _advancingChapter || (isPlaying && !_chunkStarted);
   bool get isInitializing => _isInitializing;
   bool get hasInitialized => _hasInitialized;
   int get playbackSessionId => _sessionId;
@@ -123,7 +130,7 @@ class TtsService extends ChangeNotifier {
     }
     _sleepTimer?.cancel();
     _sleepTimer = null;
-    _sleepTimerEndsAt = duration == null ? null : DateTime.now().add(duration);
+    _sleepTimerEndsAt = duration == null ? null : _clock().add(duration);
     if (duration != null) {
       _sleepTimer = Timer(duration, () => unawaited(_expireSleepTimer()));
     }
@@ -134,9 +141,7 @@ class TtsService extends ChangeNotifier {
     _sleepTimer = null;
     _sleepTimerEndsAt = null;
     _resumeAfterInterruption = false;
-    _cancelUnexpectedPauseRecovery();
-    _pauseOrigin = _PauseOrigin.user;
-    if (isPlaying) {
+    if (isPlaying || _advancingChapter) {
       final pauseSession = _sessionId + 1;
       try {
         await pause();
@@ -220,7 +225,7 @@ class TtsService extends ChangeNotifier {
       await _flutterTts.setQueueMode(0);
 
       _flutterTts.setStartHandler(() {
-        if (_useOfflineVoice) return;
+        if (_useOfflineVoice || !_acceptAndroidCallbacks) return;
         if (!isPlaying || _queuedChunks.isEmpty || _isDisposed) return;
         _chunkStarted = true;
         _markPlaybackActivity();
@@ -229,31 +234,25 @@ class TtsService extends ChangeNotifier {
       });
 
       _flutterTts.setCompletionHandler(() {
-        if (_useOfflineVoice) return;
+        if (_useOfflineVoice || !_acceptAndroidCallbacks) return;
         if (!_chunkStarted || !isPlaying || _isDisposed) return;
         _chunkStarted = false;
+        _acceptAndroidCallbacks = false;
         _markPlaybackActivity(resetRecoveryAttempts: true);
         unawaited(_handleChunkCompleted());
       });
 
       _flutterTts.setPauseHandler(() {
-        if (_useOfflineVoice) return;
+        if (_useOfflineVoice || !_acceptAndroidCallbacks) return;
         if (_isDisposed || !isPlaying || _queuedChunks.isEmpty) return;
-        final pauseOrigin = _pauseOrigin;
-        _pauseOrigin = _PauseOrigin.none;
-        _stopPlaybackWatchdog();
-        _playbackState = ReaderPlaybackState.paused;
-        notifyListeners();
-        if (pauseOrigin == _PauseOrigin.none && _queuedChunks.isNotEmpty) {
-          _scheduleUnexpectedPauseRecovery();
-        }
+        // An unsolicited native pause must not restart after a headset disconnect.
+        unawaited(pause(fromSystemInterruption: true));
       });
 
       _flutterTts.setContinueHandler(() {
-        if (_useOfflineVoice) return;
+        if (_useOfflineVoice || !_acceptAndroidCallbacks) return;
         if (!isPlaying || _queuedChunks.isEmpty || _isDisposed) return;
         _chunkStarted = true;
-        _cancelUnexpectedPauseRecovery();
         _markPlaybackActivity(resetRecoveryAttempts: true);
         _startPlaybackWatchdog();
         _playbackState = ReaderPlaybackState.playing;
@@ -262,12 +261,12 @@ class TtsService extends ChangeNotifier {
       });
 
       _flutterTts.setErrorHandler((message) {
-        if (_useOfflineVoice) return;
+        if (_useOfflineVoice || !_acceptAndroidCallbacks) return;
         unawaited(_handlePlaybackError(message));
       });
 
       _flutterTts.setProgressHandler((text, start, end, word) {
-        if (_useOfflineVoice) return;
+        if (_useOfflineVoice || !_acceptAndroidCallbacks) return;
         if (!isPlaying || _queuedChunks.isEmpty || _isDisposed) return;
         final activeChunk = _queuedChunks[_queuedChunkIndex];
         if (text != activeChunk.text) return;
@@ -282,7 +281,7 @@ class TtsService extends ChangeNotifier {
         );
         _pausedCharIndex = _currentCharIndex;
         _currentParagraphIndex = activeChunk.paragraphIndex;
-        final now = DateTime.now();
+        final now = _clock();
         if (_lastPositionSaveAt == null ||
             now.difference(_lastPositionSaveAt!) >=
                 const Duration(seconds: 2)) {
@@ -306,49 +305,70 @@ class TtsService extends ChangeNotifier {
 
   Future<void> _configureAudioSession() async {
     final session = await AudioSession.instance;
-    await session.configure(
-      const AudioSessionConfiguration.speech().copyWith(
-        androidWillPauseWhenDucked: false,
-      ),
-    );
+    await session.configure(const AudioSessionConfiguration.speech());
     _audioSession = session;
 
-    _interruptionSubscription = session.interruptionEventStream.listen((event) {
-      if (event.begin) {
-        if (!isPlaying) {
-          return;
-        }
+    _interruptionSubscription = session.interruptionEventStream.listen(
+      (event) => unawaited(handleAudioInterruption(event)),
+    );
 
+    _becomingNoisySubscription = session.becomingNoisyEventStream.listen((_) {
+      unawaited(handleAudioBecomingNoisy());
+    });
+  }
+
+  Future<void> handleAudioInterruption(AudioInterruptionEvent event) async {
+    if (_isDisposed) return;
+    try {
+      if (event.begin) {
         switch (event.type) {
-          case AudioInterruptionType.pause:
-            _resumeAfterInterruption = true;
-            unawaited(pause(fromSystemInterruption: true));
           case AudioInterruptionType.duck:
+          case AudioInterruptionType.pause:
+            if (isPlaying || _advancingChapter) {
+              _resumeAfterInterruption = true;
+              await pause(fromSystemInterruption: true);
+            }
           case AudioInterruptionType.unknown:
-            break;
+            // Permanent focus loss never grants permission to resume later.
+            _resumeAfterInterruption = false;
+            await pause();
         }
         return;
       }
-
-      switch (event.type) {
-        case AudioInterruptionType.pause:
-          if (_resumeAfterInterruption && isPaused) {
-            _resumeAfterInterruption = false;
-            unawaited(play());
-          } else {
-            _resumeAfterInterruption = false;
-          }
-        case AudioInterruptionType.duck:
-        case AudioInterruptionType.unknown:
-          break;
+      if (event.type == AudioInterruptionType.unknown) {
+        _resumeAfterInterruption = false;
+        return;
       }
-    });
+      final shouldResume = _resumeAfterInterruption && isPaused;
+      _resumeAfterInterruption = false;
+      if (shouldResume) await play();
+    } catch (error) {
+      debugPrint('Audio interruption handling failed: $error');
+    }
+  }
 
-    _becomingNoisySubscription = session.becomingNoisyEventStream.listen((_) {
-      if (isPlaying) {
-        unawaited(pause());
-      }
-    });
+  Future<void> handleAudioBecomingNoisy() => pause();
+
+  // Serialize platform side effects, but invalidate obsolete commands immediately.
+  Future<T?> _runTransport<T>(
+    int session,
+    Future<T> Function() action, {
+    bool always = false,
+  }) {
+    Future<T?> run() async {
+      if (_isDisposed || (!always && session != _sessionId)) return null;
+      return action();
+    }
+
+    final previous = _transportOperation;
+    final operation = previous == null
+        ? run()
+        : previous.then<T?>((_) => run());
+    _transportOperation = operation.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stack) {},
+    );
+    return operation;
   }
 
   Future<void> _loadVoices() async {
@@ -684,7 +704,10 @@ class TtsService extends ChangeNotifier {
     int? initialPosition,
   }) async {
     if (value == _text && !resetPosition && initialPosition == null) return;
-    if (isPlaying || isPaused) await stop();
+    if ((isPlaying || isPaused) &&
+        (_queuedChunks.isNotEmpty || _offlineEngine?.active == true)) {
+      await stop();
+    }
     _text = value;
     _readerText = ReaderText(value);
     _errorMessage = null;
@@ -831,6 +854,7 @@ class TtsService extends ChangeNotifier {
 
   Future<void> play() async {
     if (isPlaying || _isDisposed || _switchingVoice) return;
+    _resumeAfterInterruption = false;
     if (isPaused) {
       await _resumePlayback();
       return;
@@ -853,11 +877,6 @@ class TtsService extends ChangeNotifier {
       return;
     }
 
-    _currentCharIndex = normalizedSelection.start;
-    _currentParagraphIndex = _paragraphIndexForOffset(_currentCharIndex);
-    await _storageService.savePosition(_currentCharIndex);
-    notifyListeners();
-
     await _playInternal(
       startOffset: normalizedSelection.start,
       endOffset: normalizedSelection.end,
@@ -872,11 +891,6 @@ class TtsService extends ChangeNotifier {
     }
 
     final paragraphOffset = _offsetForParagraph(paragraphIndex);
-    _currentCharIndex = paragraphOffset;
-    _currentParagraphIndex = paragraphIndex;
-    await _storageService.savePosition(_currentCharIndex);
-    notifyListeners();
-
     await _playInternal(
       startOffset: paragraphOffset,
       endOffset: null,
@@ -902,14 +916,19 @@ class TtsService extends ChangeNotifier {
   Future<void> _resumePlayback() async {
     if (_useOfflineVoice && _offlineEngine?.active == true) {
       final session = ++_sessionId;
-      if (!await _activateAudioSession() || session != _sessionId) return;
       _playbackState = ReaderPlaybackState.playing;
-      _chunkStarted = true;
+      _advancingChapter = false;
+      _chunkStarted = false;
       _markPlaybackActivity(resetRecoveryAttempts: true);
       _startPlaybackWatchdog();
       notifyListeners();
       try {
-        if (await _offlineEngine!.resume()) return;
+        final resumed = await _runTransport(session, () async {
+          if (!await _activateAudioSession()) return false;
+          if (!_isPlaybackSessionActive(session)) return false;
+          return _offlineEngine!.resume();
+        });
+        if (resumed == true || !_isPlaybackSessionActive(session)) return;
       } catch (_) {
         // Regenerate the saved segment if the native audio cache was released.
       }
@@ -936,7 +955,8 @@ class TtsService extends ChangeNotifier {
     bool shouldStopBeforeQueueing = true,
     bool isRecovery = false,
   }) async {
-    if (_switchingVoice) return;
+    if (_switchingVoice || _isDisposed) return;
+    _resumeAfterInterruption = false;
     final voice = _selectedVoice;
     if (!_useOfflineVoice &&
         voice?.requiresNetwork == true &&
@@ -977,29 +997,19 @@ class TtsService extends ChangeNotifier {
       endOffset: endOffset,
     );
     if (chunks.isEmpty) {
-      _playbackState = ReaderPlaybackState.completed;
-      _currentCharIndex = resetPositionOnComplete ? 0 : startOffset;
-      _currentParagraphIndex = _paragraphIndexForOffset(_currentCharIndex);
-      await _storageService.savePosition(_currentCharIndex);
-      notifyListeners();
+      final session = ++_sessionId;
+      _queuedEndOffset = endOffset ?? startOffset;
+      _queuedResetPositionOnComplete = resetPositionOnComplete;
+      _queuedTriggerCompletionHandler = triggerCompletionHandler;
+      await _finishPlayback(session);
       return;
     }
 
     final localSession = ++_sessionId;
-    final activated = await _activateAudioSession();
-    if (localSession != _sessionId || _isDisposed) return;
-    if (!activated) {
-      _errorMessage =
-          'DhebeVoice could not take audio focus right now. Try again after other audio stops.';
-      _playbackState = ReaderPlaybackState.error;
-      notifyListeners();
-      return;
-    }
-
     _errorMessage = null;
     _chunkStarted = false;
-    _cancelUnexpectedPauseRecovery();
-    _pauseOrigin = _PauseOrigin.none;
+    _acceptAndroidCallbacks = false;
+    _advancingChapter = false;
     _playbackState = ReaderPlaybackState.playing;
     _queuedChunks = chunks;
     _queuedChunkIndex = 0;
@@ -1007,6 +1017,7 @@ class TtsService extends ChangeNotifier {
     _queuedResetPositionOnComplete = resetPositionOnComplete;
     _queuedTriggerCompletionHandler = triggerCompletionHandler;
     _activeChunkOffset = chunks.first.start;
+    _currentCharIndex = chunks.first.start;
     _pausedCharIndex = startOffset;
     _currentParagraphIndex = chunks.first.paragraphIndex;
     _markPlaybackActivity(resetRecoveryAttempts: !isRecovery);
@@ -1014,22 +1025,35 @@ class TtsService extends ChangeNotifier {
     notifyListeners();
 
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      unawaited(AudioService.androidForceEnableMediaButtons());
+      unawaited(refreshMediaButtons());
     }
 
-    await _syncTtsOptions();
-    if (!_isPlaybackSessionActive(localSession)) return;
-    if (shouldStopBeforeQueueing) {
-      await _stopSpeech();
-    }
-    if (!_isPlaybackSessionActive(localSession)) return;
-
-    final started = await _startCurrentChunk(localSession);
-    if (!started && _isPlaybackSessionActive(localSession)) {
-      await _handlePlaybackError(
-        (_useOfflineVoice ? _offlineEngine?.lastError : null) ??
-            'DhebeVoice could not start the selected voice. Try another installed voice.',
-      );
+    try {
+      final activated = await _runTransport(localSession, () async {
+        if (shouldStopBeforeQueueing) await _stopSpeech();
+        if (!_isPlaybackSessionActive(localSession)) return false;
+        return _activateAudioSession();
+      });
+      if (!_isPlaybackSessionActive(localSession)) return;
+      if (activated != true) {
+        await _handlePlaybackError(
+          'DhebeVoice could not take audio focus right now. Try again after other audio stops.',
+        );
+        return;
+      }
+      await _syncTtsOptions();
+      if (!_isPlaybackSessionActive(localSession)) return;
+      final started = await _startCurrentChunk(localSession);
+      if (!started && _isPlaybackSessionActive(localSession)) {
+        await _handlePlaybackError(
+          (_useOfflineVoice ? _offlineEngine?.lastError : null) ??
+              'DhebeVoice could not start the selected voice. Try another installed voice.',
+        );
+      }
+    } catch (error) {
+      if (_isPlaybackSessionActive(localSession)) {
+        await _handlePlaybackError(error);
+      }
     }
   }
 
@@ -1048,21 +1072,30 @@ class TtsService extends ChangeNotifier {
       _currentCharIndex = chunk.start;
       _pausedCharIndex = chunk.start;
       _chunkStarted = false;
-      final started = await _offlineEngine!.speak(
-        directory: modelStore.directoryPath!,
-        text: chunk.text,
-        voice: _selectedVoice?.name ?? 'F1',
-        language: _selectedLanguage,
-        speed: (_speechRate / 0.48).clamp(0.5, 2.0),
-        volume: _volume,
+      final started = await _runTransport(
+        sessionId,
+        () => _offlineEngine!.speak(
+          directory: modelStore.directoryPath!,
+          text: chunk.text,
+          voice: _selectedVoice?.name ?? 'F1',
+          language: _selectedLanguage,
+          speed: (_speechRate / 0.48).clamp(0.5, 2.0),
+          volume: _volume,
+          nextText: _queuedChunkIndex + 1 < _queuedChunks.length
+              ? _queuedChunks[_queuedChunkIndex + 1].text
+              : null,
+        ),
       );
-      return _isPlaybackSessionActive(sessionId) && started;
+      return _isPlaybackSessionActive(sessionId) && started == true;
     }
 
     await _flutterTts.setQueueMode(0);
     if (!_isPlaybackSessionActive(sessionId)) return false;
     _chunkStarted = false;
-    final result = await _flutterTts.speak(chunk.text, focus: false);
+    final result = await _runTransport(sessionId, () {
+      _acceptAndroidCallbacks = true;
+      return _flutterTts.speak(chunk.text, focus: false);
+    });
     return _isPlaybackSessionActive(sessionId) && result == 1;
   }
 
@@ -1098,39 +1131,51 @@ class TtsService extends ChangeNotifier {
         return;
       }
 
-      final triggerCompletionHandler = _queuedTriggerCompletionHandler;
-      final resetPositionOnComplete = _queuedResetPositionOnComplete;
-      final finalOffset = _queuedEndOffset ?? _queuedChunks.last.end;
-
-      _queuedChunks = const [];
-      _queuedChunkIndex = 0;
-      _queuedEndOffset = null;
-      _resumeAfterInterruption = false;
-      _cancelUnexpectedPauseRecovery();
-      _stopPlaybackWatchdog();
-      await _audioSession?.setActive(false);
-      if (!_isPlaybackSessionActive(session)) return;
-
-      _playbackState = ReaderPlaybackState.completed;
-      _currentCharIndex = resetPositionOnComplete
-          ? 0
-          : min(finalOffset, _text.length);
-      _pausedCharIndex = _currentCharIndex;
-      _currentParagraphIndex = _paragraphIndexForOffset(_currentCharIndex);
-      await _storageService.savePosition(_currentCharIndex);
-      if (session != _sessionId || _isDisposed) return;
-      notifyListeners();
-
-      final handler = _playbackCompletedHandler;
-      if (triggerCompletionHandler && handler != null) {
-        await handler();
-      }
+      await _finishPlayback(session);
     } catch (error) {
       if (session == _sessionId && !_isDisposed) {
         await _handlePlaybackError(error);
       }
     } finally {
       if (_completingSession == session) _completingSession = null;
+    }
+  }
+
+  Future<void> _finishPlayback(int session) async {
+    final handler = _queuedTriggerCompletionHandler
+        ? _playbackCompletedHandler
+        : null;
+    final finalOffset =
+        _queuedEndOffset ??
+        (_queuedChunks.isEmpty ? _currentCharIndex : _queuedChunks.last.end);
+    _queuedChunks = const [];
+    _queuedChunkIndex = 0;
+    _queuedEndOffset = null;
+    _chunkStarted = false;
+    _acceptAndroidCallbacks = false;
+    _resumeAfterInterruption = false;
+    _stopPlaybackWatchdog();
+    _playbackState = ReaderPlaybackState.completed;
+    _advancingChapter = handler != null;
+    _currentCharIndex = _queuedResetPositionOnComplete
+        ? 0
+        : min(finalOffset, _text.length);
+    _pausedCharIndex = _currentCharIndex;
+    _currentParagraphIndex = _paragraphIndexForOffset(_currentCharIndex);
+    try {
+      await _storageService.savePosition(_currentCharIndex);
+      if (session != _sessionId || _isDisposed) return;
+      notifyListeners();
+      // Keep focus and the foreground media session across chapter handoff.
+      await handler?.call();
+    } finally {
+      if (session == _sessionId && !_isDisposed) {
+        _advancingChapter = false;
+        notifyListeners();
+        await _runTransport(session, () async {
+          await _setAudioActive(false);
+        });
+      }
     }
   }
 
@@ -1143,23 +1188,31 @@ class TtsService extends ChangeNotifier {
 
     final session = ++_sessionId;
     _chunkStarted = false;
+    _acceptAndroidCallbacks = false;
+    _advancingChapter = false;
     _queuedChunks = const [];
     _queuedChunkIndex = 0;
     _queuedEndOffset = null;
     _resumeAfterInterruption = false;
-    _cancelUnexpectedPauseRecovery();
     _stopPlaybackWatchdog();
-    await _audioSession?.setActive(false);
-    if (session != _sessionId || _isDisposed) return;
-
     _playbackState = ReaderPlaybackState.error;
     _errorMessage = _friendlyPlaybackError(message);
-    if (_useOfflineVoice) await _offlineEngine?.stop();
     _pausedCharIndex = min(
       max(_currentCharIndex, _activeChunkOffset),
       _text.length,
     );
     notifyListeners();
+    try {
+      await _runTransport(session, () async {
+        try {
+          await _stopSpeech();
+        } finally {
+          await _setAudioActive(false);
+        }
+      }, always: true);
+    } catch (error) {
+      debugPrint('Playback error cleanup failed: $error');
+    }
   }
 
   String _friendlyPlaybackError(dynamic message) {
@@ -1177,11 +1230,17 @@ class TtsService extends ChangeNotifier {
   }
 
   Future<bool> _activateAudioSession() async {
+    return _setAudioActive(true);
+  }
+
+  Future<bool> _setAudioActive(bool active) async {
+    final override = _setAudioSessionActive;
+    if (override != null) return override(active);
     final session = _audioSession;
     if (session == null) {
       return true;
     }
-    return session.setActive(true);
+    return session.setActive(active);
   }
 
   bool _isPlaybackSessionActive(int sessionId) {
@@ -1191,19 +1250,15 @@ class TtsService extends ChangeNotifier {
   }
 
   Future<void> pause({bool fromSystemInterruption = false}) async {
-    if (!isPlaying) {
-      return;
-    }
-
     if (!fromSystemInterruption) {
       _resumeAfterInterruption = false;
     }
-    _pauseOrigin = fromSystemInterruption
-        ? _PauseOrigin.system
-        : _PauseOrigin.user;
-    _cancelUnexpectedPauseRecovery();
-    _sessionId++;
+    final wasActive = isPlaying || isPaused || _advancingChapter;
+    final session = ++_sessionId;
+    if (!wasActive) return;
+    _advancingChapter = false;
     _chunkStarted = false;
+    _acceptAndroidCallbacks = false;
     _pausedCharIndex = min(
       max(_currentCharIndex, _activeChunkOffset),
       _text.length,
@@ -1212,36 +1267,84 @@ class TtsService extends ChangeNotifier {
     _stopPlaybackWatchdog();
     _playbackState = ReaderPlaybackState.paused;
     _errorMessage = null;
-    if (_useOfflineVoice) {
-      await _offlineEngine?.pause();
-    } else {
-      await _flutterTts.pause();
+    notifyListeners();
+    try {
+      await _runTransport(session, () async {
+        try {
+          try {
+            if (_useOfflineVoice) {
+              await _offlineEngine?.pause();
+            } else {
+              await _flutterTts.pause();
+            }
+          } catch (error) {
+            debugPrint('Native pause failed; stopping the segment: $error');
+            await _stopSpeech();
+          }
+        } finally {
+          if (!fromSystemInterruption) await _setAudioActive(false);
+        }
+      }, always: true);
+    } catch (error) {
+      debugPrint('Playback pause failed: $error');
+      if (session == _sessionId) {
+        _errorMessage = 'The audio device could not pause. Please try Stop.';
+      }
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      unawaited(AudioService.androidForceEnableMediaButtons());
+      unawaited(refreshMediaButtons());
     }
-    await _storageService.savePosition(_currentCharIndex);
+    if (session != _sessionId || _isDisposed) return;
+    await _storageService.savePosition(_pausedCharIndex);
     notifyListeners();
   }
 
-  Future<void> stop() async {
-    _sessionId++;
+  Future<void> stop({
+    bool preserveSleepTimer = false,
+    bool keepAudioSession = false,
+  }) async {
+    final wasPaused = isPaused;
+    final session = ++_sessionId;
     _chunkStarted = false;
+    _acceptAndroidCallbacks = false;
+    _advancingChapter = keepAudioSession && !wasPaused;
     _queuedChunks = const [];
     _queuedChunkIndex = 0;
     _queuedEndOffset = null;
+    _queuedResetPositionOnComplete = true;
+    _queuedTriggerCompletionHandler = true;
     _resumeAfterInterruption = false;
-    _cancelUnexpectedPauseRecovery();
-    _pauseOrigin = _PauseOrigin.none;
+    if (!preserveSleepTimer) {
+      _sleepTimer?.cancel();
+      _sleepTimer = null;
+      _sleepTimerEndsAt = null;
+    }
     _stopPlaybackWatchdog();
-    _playbackState = ReaderPlaybackState.stopped;
+    _playbackState = keepAudioSession && wasPaused
+        ? ReaderPlaybackState.paused
+        : ReaderPlaybackState.stopped;
     _errorMessage = null;
     _currentCharIndex = 0;
     _currentParagraphIndex = 0;
     _activeChunkOffset = 0;
     _pausedCharIndex = 0;
-    await _stopSpeech();
-    await _audioSession?.setActive(false);
+    notifyListeners();
+    try {
+      await _runTransport(session, () async {
+        try {
+          await _stopSpeech();
+        } finally {
+          if (!keepAudioSession) await _setAudioActive(false);
+        }
+      }, always: true);
+    } catch (error) {
+      debugPrint('Playback stop failed: $error');
+      if (session == _sessionId) {
+        _errorMessage =
+            'The audio device could not stop cleanly. Try reopening the app.';
+      }
+    }
+    if (session != _sessionId || _isDisposed) return;
     await _storageService.savePosition(0);
     notifyListeners();
   }
@@ -1287,7 +1390,7 @@ class TtsService extends ChangeNotifier {
   }
 
   void _markPlaybackActivity({bool resetRecoveryAttempts = false}) {
-    _lastPlaybackActivityAt = DateTime.now();
+    _lastPlaybackActivityAt = _clock();
     if (resetRecoveryAttempts) {
       _stallRecoveryAttempts = 0;
     }
@@ -1300,28 +1403,9 @@ class TtsService extends ChangeNotifier {
     });
   }
 
-  void _cancelUnexpectedPauseRecovery() {
-    _unexpectedPauseRecoveryTimer?.cancel();
-    _unexpectedPauseRecoveryTimer = null;
-  }
-
-  void _scheduleUnexpectedPauseRecovery() {
-    _cancelUnexpectedPauseRecovery();
-    _unexpectedPauseRecoveryTimer = Timer(const Duration(seconds: 2), () {
-      if (_playbackState != ReaderPlaybackState.paused ||
-          _queuedChunks.isEmpty ||
-          _resumeAfterInterruption) {
-        return;
-      }
-
-      unawaited(_resumePlayback());
-    });
-  }
-
   void _stopPlaybackWatchdog() {
     _playbackWatchdog?.cancel();
     _playbackWatchdog = null;
-    _cancelUnexpectedPauseRecovery();
     _lastPlaybackActivityAt = null;
     _stallRecoveryAttempts = 0;
     _isRecoveringFromStall = false;
@@ -1332,9 +1416,12 @@ class TtsService extends ChangeNotifier {
       return;
     }
 
-    if (_appLifecycleState == AppLifecycleState.paused ||
-        _appLifecycleState == AppLifecycleState.inactive ||
-        _appLifecycleState == AppLifecycleState.hidden) {
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    if (!isAndroid &&
+        (_appLifecycleState == AppLifecycleState.paused ||
+            _appLifecycleState == AppLifecycleState.inactive ||
+            _appLifecycleState == AppLifecycleState.hidden)) {
       return;
     }
 
@@ -1343,10 +1430,19 @@ class TtsService extends ChangeNotifier {
       return;
     }
 
-    final timeout = _useOfflineVoice && _offlineEngine?.generating == true
+    var timeout = _useOfflineVoice && _offlineEngine?.generating == true
         ? const Duration(minutes: 3)
         : _watchdogTimeout;
-    if (DateTime.now().difference(lastPlaybackActivityAt) < timeout) {
+    if (!_useOfflineVoice && _chunkStarted) {
+      // Older Android engines may not provide word-progress callbacks at all.
+      final chunk = _queuedChunks[_queuedChunkIndex];
+      final estimatedSeconds =
+          (chunk.text.length / (max(0.1, _speechRate) * 28)).ceil();
+      timeout = Duration(
+        seconds: max(timeout.inSeconds, estimatedSeconds + 12),
+      );
+    }
+    if (_clock().difference(lastPlaybackActivityAt) < timeout) {
       return;
     }
 
@@ -1397,10 +1493,19 @@ class TtsService extends ChangeNotifier {
         state == AppLifecycleState.resumed &&
         (_playbackState == ReaderPlaybackState.playing ||
             _playbackState == ReaderPlaybackState.paused)) {
-      unawaited(AudioService.androidForceEnableMediaButtons());
+      unawaited(refreshMediaButtons());
     }
 
     notifyListeners();
+  }
+
+  Future<void> refreshMediaButtons() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await AudioService.androidForceEnableMediaButtons();
+    } catch (error) {
+      debugPrint('Could not refresh media buttons: $error');
+    }
   }
 
   @override
@@ -1415,9 +1520,9 @@ class TtsService extends ChangeNotifier {
     _interruptionSubscription?.cancel();
     _becomingNoisySubscription?.cancel();
     _playbackWatchdog?.cancel();
-    _unexpectedPauseRecoveryTimer?.cancel();
     _sleepTimer?.cancel();
     unawaited(_flutterTts.stop());
+    unawaited(_setAudioActive(false));
     unawaited(_offlineEngine?.dispose());
     modelStore.dispose();
     super.dispose();

@@ -164,7 +164,7 @@ class ReaderViewDialog extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   PlayerControls(
-                    isPlaying: service.isPlaying,
+                    isPlaying: service.isPlaying || service.isAdvancingChapter,
                     canResume: service.isPaused || service.currentCharIndex > 0,
                     enabled:
                         service.hasInitialized &&

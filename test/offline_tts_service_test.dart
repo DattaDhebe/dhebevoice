@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -110,10 +111,19 @@ void main() {
     () async {
       await service.updateText('First paragraph.\n\nSecond paragraph.');
       await service.play();
+      expect(
+        calls.lastWhere((c) => c.method == 'speak').arguments['nextText'],
+        'Second paragraph.',
+      );
       await event('started');
       await event('completed');
       expect(calls.where((c) => c.method == 'speak').length, 2);
       expect(service.currentParagraphIndex, 1);
+      expect(
+        (calls.lastWhere((c) => c.method == 'speak').arguments as Map)
+            .containsKey('nextText'),
+        isFalse,
+      );
       await event('started');
       await event('completed');
       await event('completed');
@@ -144,6 +154,76 @@ void main() {
     expect(service.playbackState, ReaderPlaybackState.stopped);
     expect(calls.where((c) => c.method == 'speak').length, 1);
     expect(chapterCompletions, 0);
+  });
+
+  test(
+    'interrupted neural audio resumes the cache without regenerating',
+    () async {
+      await service.updateText('A story in one paragraph.');
+      await service.play();
+      await event('started');
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      expect(calls.where((c) => c.method == 'speak').length, 1);
+      expect(calls.where((c) => c.method == 'resume').length, 1);
+      expect(service.isPlaying, isTrue);
+      await event('started');
+      expect(service.isBuffering, isFalse);
+    },
+  );
+
+  test(
+    'Bluetooth disconnect during neural preparation waits for manual Play',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      expect(service.isBuffering, isTrue);
+      await service.handleAudioBecomingNoisy();
+      await event('started');
+      expect(service.isPaused, isTrue);
+      await service.handleAudioInterruption(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      expect(calls.where((c) => c.method == 'resume'), isEmpty);
+      await service.play();
+      await event('started');
+      expect(service.isPlaying, isTrue);
+      expect(calls.where((c) => c.method == 'speak').length, 1);
+    },
+  );
+
+  test(
+    'rapid neural Pause, Play and Stop cannot revive cached audio',
+    () async {
+      await service.updateText('Story.');
+      await service.play();
+      await event('started');
+      final pausing = service.pause();
+      final playing = service.play();
+      final stopping = service.stop();
+      await pausing;
+      await playing;
+      await stopping;
+      await event('started');
+      await event('completed');
+      expect(service.playbackState, ReaderPlaybackState.stopped);
+      expect(chapterCompletions, 0);
+    },
+  );
+
+  test('selected text does not pre-generate outside the selection', () async {
+    await service.updateText('Read this only.\n\nDo not read this paragraph.');
+    await service.playSelection(
+      const TextSelection(baseOffset: 0, extentOffset: 15),
+    );
+    final arguments =
+        calls.lastWhere((c) => c.method == 'speak').arguments as Map;
+    expect(arguments['text'], 'Read this only.');
+    expect(arguments.containsKey('nextText'), isFalse);
   });
 
   test('old Android callbacks cannot affect neural playback', () async {
