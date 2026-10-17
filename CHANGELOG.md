@@ -4,6 +4,8 @@ This file distinguishes current source changes from previously uploaded app bund
 
 ## Unreleased
 
+- Refresh the home reader with clearer book/chapter hierarchy, a compact borderless editor, an uncluttered empty state, and a persistent playback dock.
+- Add home-screen paragraph shortcuts and direct voice-settings access; preserve full reading views, imports, text selection, and existing playback behavior.
 - Show explicit Android voice-type metadata, or **Gender not provided** when the provider does not supply it.
 - Add reversible personal Female/Male/Child labels, stored separately for each engine, voice ID, and language without interrupting playback.
 - Add persistence, playback, save-failure, and small-screen regression coverage for voice labeling.

@@ -11,6 +11,7 @@ import '../services/novel_import_controller.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../widgets/import_web_link_dialog.dart';
+import '../widgets/home_reading_content.dart';
 import '../widgets/player_controls.dart';
 import '../widgets/playback_status.dart';
 import '../widgets/reader_consumer.dart';
@@ -393,6 +394,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _showReaderPopup() => _showReadingView(fullContent: false);
   void _showContentPopup() => _showReadingView(fullContent: true);
 
+  void _showSettings() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+  }
+
   void _showReadingView({required bool fullContent}) {
     FocusManager.instance.primaryFocus?.unfocus();
     showDialog<void>(
@@ -682,10 +690,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           return Scaffold(
             appBar: AppBar(
-              title: const Text(
-                'DhebeVoice',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              title: Row(
+                children: [
+                  if (MediaQuery.sizeOf(context).width >= 360 &&
+                      MediaQuery.textScalerOf(context).scale(1) < 1.5) ...[
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.graphic_eq_rounded,
+                        size: 21,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  const Flexible(
+                    child: Text(
+                      'DhebeVoice',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
               actions: [
                 IconButton(
@@ -718,11 +749,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       case _ReaderAction.sleepTimer:
                         _showSleepTimer();
                       case _ReaderAction.settings:
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const SettingsScreen(),
-                          ),
-                        );
+                        _showSettings();
                       case _ReaderAction.guide:
                         unawaited(_showFirstRunGuideIfNeeded(force: true));
                     }
@@ -766,377 +793,285 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ],
             ),
-            bottomNavigationBar: SafeArea(
-              top: false,
-              minimum: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Center(
-                heightFactor: 1,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 840),
-                  child: PlayerControls(
-                    status: PlaybackStatus(
-                      service: ttsService,
-                      compact:
-                          isKeyboardOpen ||
-                          MediaQuery.textScalerOf(context).scale(1) > 1.4,
+            bottomNavigationBar: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+              ),
+              child: SafeArea(
+                top: false,
+                minimum: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Center(
+                  heightFactor: 1,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 840),
+                    child: PlayerControls(
+                      key: const ValueKey('home-playback-controls'),
+                      embedded: true,
+                      compactIconsOnly:
+                          isKeyboardOpen &&
+                          MediaQuery.sizeOf(context).height -
+                                  MediaQuery.viewInsetsOf(context).bottom <
+                              420,
+                      status: PlaybackStatus(
+                        service: ttsService,
+                        compact:
+                            isKeyboardOpen ||
+                            MediaQuery.textScalerOf(context).scale(1) > 1.4,
+                      ),
+                      stopEnabled:
+                          ttsService.isPlaying ||
+                          ttsService.isPaused ||
+                          ttsService.isAdvancingChapter ||
+                          ttsService.switchingVoice,
+                      enabled:
+                          controlsReady &&
+                          !ttsService.switchingVoice &&
+                          ttsService.paragraphCount > 0,
+                      isPlaying:
+                          ttsService.isPlaying || ttsService.isAdvancingChapter,
+                      canResume:
+                          ttsService.isPaused ||
+                          ttsService.currentCharIndex > 0,
+                      onPlay: () =>
+                          unawaited(_playUsingBestAvailableController()),
+                      onPause: () =>
+                          unawaited(_pauseUsingBestAvailableController()),
+                      onStop: () =>
+                          unawaited(_stopUsingBestAvailableController()),
+                      wrapInSafeArea: false,
                     ),
-                    stopEnabled:
-                        ttsService.isPlaying ||
-                        ttsService.isPaused ||
-                        ttsService.isAdvancingChapter ||
-                        ttsService.switchingVoice,
-                    enabled:
-                        controlsReady &&
-                        !ttsService.switchingVoice &&
-                        ttsService.paragraphCount > 0,
-                    isPlaying:
-                        ttsService.isPlaying || ttsService.isAdvancingChapter,
-                    canResume:
-                        ttsService.isPaused || ttsService.currentCharIndex > 0,
-                    onPlay: () =>
-                        unawaited(_playUsingBestAvailableController()),
-                    onPause: () =>
-                        unawaited(_pauseUsingBestAvailableController()),
-                    onStop: () =>
-                        unawaited(_stopUsingBestAvailableController()),
-                    wrapInSafeArea: false,
                   ),
                 ),
               ),
             ),
-            body: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final editorHeight = isKeyboardOpen
-                      ? 300.0
-                      : (constraints.maxHeight * 0.42).clamp(320.0, 480.0);
-                  final textScale = MediaQuery.textScalerOf(
-                    context,
-                  ).scale(1).clamp(1.0, 2.5);
+            body: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Theme.of(context).scaffoldBackgroundColor,
+                    Theme.of(context).colorScheme.surfaceContainerLow,
+                  ],
+                ),
+              ),
+              child: SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final editorHeight = isKeyboardOpen
+                        ? 180.0
+                        : (constraints.maxHeight * 0.20).clamp(112.0, 240.0);
 
-                  return Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 880),
-                      child: ListView(
-                        keyboardDismissBehavior:
-                            ScrollViewKeyboardDismissBehavior.onDrag,
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                        children: [
-                          if (importer.activeNovel == null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 16),
-                              child: Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  FilledButton.icon(
-                                    onPressed: importer.isImporting
-                                        ? null
-                                        : () => unawaited(
-                                            importer.importLocalFile(),
-                                          ),
-                                    icon: const Icon(
-                                      Icons.upload_file_outlined,
-                                    ),
-                                    label: const Text('Import file'),
-                                  ),
-                                  OutlinedButton.icon(
-                                    onPressed: _showImportUrlDialog,
-                                    icon: const Icon(Icons.link),
-                                    label: const Text('Web link'),
-                                  ),
-                                  OutlinedButton.icon(
-                                    onPressed: _showSleepTimer,
-                                    icon: Icon(
-                                      ttsService.sleepTimerEndsAt == null
-                                          ? Icons.bedtime_outlined
-                                          : Icons.bedtime,
-                                    ),
-                                    label: Text(
-                                      ttsService.sleepTimerEndsAt == null
-                                          ? 'Sleep timer'
-                                          : 'Pause at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(ttsService.sleepTimerEndsAt!))}',
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          if (startupError != null) ...[
-                            Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(18),
-                                child: Text(
-                                  startupError,
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                          if (startupError == null && !servicesReady) ...[
-                            Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(18),
-                                child: Row(
-                                  children: [
-                                    const SizedBox(
-                                      width: 22,
-                                      height: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.6,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Text(
-                                        'Preparing voices and playback controls…',
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodyMedium,
-                                      ),
-                                    ),
-                                    if (!audioHandlerController.isReady)
-                                      Text(
-                                        'Starting',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelMedium
-                                            ?.copyWith(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                          ],
-                          if (importer.isImporting && _isImportDialogMinimized)
-                            _ImportMiniBar(
-                              importer: importer,
-                              onOpenProgress: () {
-                                setState(() {
-                                  _isImportDialogMinimized = false;
-                                });
-                              },
-                              onStop: () => unawaited(importer.cancelImport()),
-                            ),
-                          if (!importer.isImporting &&
-                              importer.hasPendingSharedUrl)
-                            _ImportStatusCard(
-                              importer: importer,
-                              onStartImport: _showImportUrlDialog,
-                              onStartPendingImport: () =>
-                                  unawaited(importer.importPendingSharedUrl()),
-                              onClearSharedLink: () =>
-                                  unawaited(importer.clearPendingSharedUrl()),
-                            ),
-                          if (!importer.isImporting &&
-                              !importer.hasPendingSharedUrl &&
-                              (importer.importStatus != null ||
-                                  importer.errorMessage != null))
-                            Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        [
-                                          if (importer.importStatus != null)
-                                            importer.importStatus!,
-                                          if (importer.errorMessage != null)
-                                            importer.errorMessage!,
-                                        ].join('\n'),
-                                        style: importer.errorMessage == null
-                                            ? null
-                                            : TextStyle(
-                                                color: Theme.of(
-                                                  context,
-                                                ).colorScheme.error,
-                                              ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Dismiss import message',
-                                      onPressed: importer.clearImportMessage,
-                                      icon: const Icon(Icons.close),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          if (importer.activeNovel != null) ...[
+                    return Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 880),
+                        child: ListView(
+                          key: const PageStorageKey('home-reader-scroll'),
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                          children: [
                             if (importer.isImporting &&
                                 _isImportDialogMinimized)
-                              const SizedBox(height: 16)
-                            else if (!importer.isImporting &&
-                                importer.hasPendingSharedUrl)
-                              const SizedBox(height: 16),
-                            _ActiveNovelCard(
-                              importer: importer,
-                              onOpenChapters: _showChapterSheet,
-                              onPreviousChapter: () => unawaited(
-                                _skipToPreviousUsingBestAvailableController(),
-                              ),
-                              onNextChapter: () => unawaited(
-                                _skipToNextUsingBestAvailableController(),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            height: editorHeight + (textScale - 1) * 160,
-                            child: Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            'Reading content',
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w800,
-                                                ),
-                                          ),
-                                        ),
-                                        Flexible(
-                                          child: TextButton(
-                                            key: const ValueKey(
-                                              'content-full-view',
-                                            ),
-                                            onPressed: _showContentPopup,
-                                            child: const Text(
-                                              'View full',
-                                              maxLines: 2,
-                                              textAlign: TextAlign.center,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Wrap(
-                                      spacing: 8,
-                                      children: [
-                                        TextButton.icon(
-                                          onPressed: _pasteText,
-                                          icon: const Icon(
-                                            Icons.content_paste,
-                                            size: 18,
-                                          ),
-                                          label: const Text('Paste text'),
-                                        ),
-                                        if (ttsService.text.isNotEmpty)
-                                          TextButton.icon(
-                                            onPressed: () => unawaited(
-                                              _replaceEditorText(''),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.note_add_outlined,
-                                              size: 18,
-                                            ),
-                                            label: const Text('New text'),
-                                          ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Expanded(
-                                      child: TextField(
-                                        controller: _textController,
-                                        maxLines: null,
-                                        expands: true,
-                                        textAlignVertical:
-                                            TextAlignVertical.top,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyLarge
-                                            ?.copyWith(height: 1.5),
-                                        contextMenuBuilder:
-                                            (context, editableTextState) {
-                                              final selection =
-                                                  editableTextState
-                                                      .textEditingValue
-                                                      .selection;
-                                              final buttonItems =
-                                                  <ContextMenuButtonItem>[
-                                                    ...editableTextState
-                                                        .contextMenuButtonItems,
-                                                    if (selection.isValid &&
-                                                        !selection.isCollapsed)
-                                                      ContextMenuButtonItem(
-                                                        label: 'Play selection',
-                                                        onPressed: () {
-                                                          ContextMenuController.removeAny();
-                                                          unawaited(
-                                                            ttsService
-                                                                .playSelection(
-                                                                  selection,
-                                                                ),
-                                                          );
-                                                        },
-                                                      ),
-                                                  ];
-
-                                              return AdaptiveTextSelectionToolbar.buttonItems(
-                                                anchors: editableTextState
-                                                    .contextMenuAnchors,
-                                                buttonItems: buttonItems,
-                                              );
-                                            },
-                                        decoration: const InputDecoration(
-                                          hintText:
-                                              'Paste text here, import a .txt, .epub, or .pdf file, or share a web link from your browser.',
-                                          border: InputBorder.none,
-                                          enabledBorder: InputBorder.none,
-                                          focusedBorder: InputBorder.none,
-                                          disabledBorder: InputBorder.none,
-                                          errorBorder: InputBorder.none,
-                                          focusedErrorBorder: InputBorder.none,
-                                          filled: false,
-                                          isCollapsed: true,
-                                          contentPadding: EdgeInsets.zero,
-                                        ),
-                                        onChanged: (value) {
-                                          unawaited(
-                                            importer.detachIfTextChanged(value),
-                                          );
-                                          unawaited(
-                                            ttsService.updateText(value),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ],
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: _ImportMiniBar(
+                                  importer: importer,
+                                  onOpenProgress: () {
+                                    setState(() {
+                                      _isImportDialogMinimized = false;
+                                    });
+                                  },
+                                  onStop: () =>
+                                      unawaited(importer.cancelImport()),
                                 ),
                               ),
-                            ),
-                          ),
-                          if (!isKeyboardOpen) ...[
+                            if (importer.activeNovel == null &&
+                                controlsReady &&
+                                !isKeyboardOpen &&
+                                !importer.isImporting &&
+                                !importer.hasPendingSharedUrl)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: _StartListeningCard(
+                                  onImportFile: importer.isImporting
+                                      ? null
+                                      : () => unawaited(
+                                          importer.importLocalFile(),
+                                        ),
+                                  onWebLink: _showImportUrlDialog,
+                                  onSleepTimer: _showSleepTimer,
+                                  timerActive:
+                                      ttsService.sleepTimerEndsAt != null,
+                                  timerLabel:
+                                      ttsService.sleepTimerEndsAt == null
+                                      ? 'Sleep timer'
+                                      : 'Pause at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(ttsService.sleepTimerEndsAt!))}',
+                                ),
+                              ),
+                            if (startupError != null) ...[
+                              Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(18),
+                                  child: Text(
+                                    startupError,
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.error,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (startupError == null && !servicesReady) ...[
+                              Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(18),
+                                  child: Row(
+                                    children: [
+                                      const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.6,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Text(
+                                          'Preparing voices and playback controls…',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodyMedium,
+                                        ),
+                                      ),
+                                      if (!audioHandlerController.isReady)
+                                        Text(
+                                          'Starting',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelMedium
+                                              ?.copyWith(
+                                                color: Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurfaceVariant,
+                                              ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            if (!importer.isImporting &&
+                                importer.hasPendingSharedUrl)
+                              _ImportStatusCard(
+                                importer: importer,
+                                onStartImport: _showImportUrlDialog,
+                                onStartPendingImport: () => unawaited(
+                                  importer.importPendingSharedUrl(),
+                                ),
+                                onClearSharedLink: () =>
+                                    unawaited(importer.clearPendingSharedUrl()),
+                              ),
+                            if (!importer.isImporting &&
+                                !importer.hasPendingSharedUrl &&
+                                (importer.importStatus != null ||
+                                    importer.errorMessage != null))
+                              Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          [
+                                            if (importer.importStatus != null)
+                                              importer.importStatus!,
+                                            if (importer.errorMessage != null)
+                                              importer.errorMessage!,
+                                          ].join('\n'),
+                                          style: importer.errorMessage == null
+                                              ? null
+                                              : TextStyle(
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.error,
+                                                ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Dismiss import message',
+                                        onPressed: importer.clearImportMessage,
+                                        icon: const Icon(Icons.close),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (importer.activeNovel != null) ...[
+                              if (importer.isImporting &&
+                                  _isImportDialogMinimized)
+                                const SizedBox(height: 16)
+                              else if (!importer.isImporting &&
+                                  importer.hasPendingSharedUrl)
+                                const SizedBox(height: 16),
+                              _ActiveNovelCard(
+                                importer: importer,
+                                onOpenChapters: _showChapterSheet,
+                                onPreviousChapter: () => unawaited(
+                                  _skipToPreviousUsingBestAvailableController(),
+                                ),
+                                onNextChapter: () => unawaited(
+                                  _skipToNextUsingBestAvailableController(),
+                                ),
+                              ),
+                            ],
                             const SizedBox(height: 16),
-                            _NowReadingCard(
-                              ttsService: ttsService,
-                              chapterLabel: importer.activeChapter?.title,
-                              onOpenParagraphs: _showParagraphSheet,
-                              onOpenPopup: _showReaderPopup,
+                            HomeReadingContent(
+                              key: const ValueKey('home-content-section'),
+                              controller: _textController,
+                              editorHeight: editorHeight,
+                              showBookEditingHint:
+                                  importer.activeNovel != null &&
+                                  isKeyboardOpen,
+                              onViewFull: _showContentPopup,
+                              onPaste: _pasteText,
+                              onNewText: () =>
+                                  unawaited(_replaceEditorText('')),
+                              onPlaySelection: (selection) => unawaited(
+                                ttsService.playSelection(selection),
+                              ),
+                              onChanged: (value) {
+                                unawaited(importer.detachIfTextChanged(value));
+                                unawaited(ttsService.updateText(value));
+                              },
                             ),
+                            if (!isKeyboardOpen &&
+                                ttsService.paragraphCount > 0) ...[
+                              const SizedBox(height: 16),
+                              _NowReadingCard(
+                                ttsService: ttsService,
+                                chapterLabel: importer.activeChapter?.title,
+                                onOpenParagraphs: _showParagraphSheet,
+                                onOpenPopup: _showReaderPopup,
+                                onVoiceSettings: _showSettings,
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
           );
@@ -1348,7 +1283,11 @@ class _ImportMiniBar extends StatelessWidget {
             ),
             if (importer.importStatus != null) ...[
               const SizedBox(height: 8),
-              Text(importer.importStatus!),
+              Text(
+                importer.importStatus!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
             const SizedBox(height: 12),
             LinearProgressIndicator(value: importer.importProgress),
@@ -1522,6 +1461,83 @@ class _ImportStatusCard extends StatelessWidget {
   }
 }
 
+class _StartListeningCard extends StatelessWidget {
+  const _StartListeningCard({
+    required this.onImportFile,
+    required this.onWebLink,
+    required this.onSleepTimer,
+    required this.timerActive,
+    required this.timerLabel,
+  });
+
+  final VoidCallback? onImportFile;
+  final VoidCallback onWebLink;
+  final VoidCallback onSleepTimer;
+  final bool timerActive;
+  final String timerLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      key: const ValueKey('start-listening'),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'What would you like to hear?',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: -.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Bring a book, a web page, or a few words of your own.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: onImportFile,
+                icon: const Icon(Icons.upload_file_outlined, size: 20),
+                label: const Text('Import file'),
+              ),
+              OutlinedButton.icon(
+                onPressed: onWebLink,
+                icon: const Icon(Icons.link_rounded, size: 20),
+                label: const Text('Web link'),
+              ),
+              TextButton.icon(
+                onPressed: onSleepTimer,
+                icon: Icon(
+                  timerActive ? Icons.bedtime : Icons.bedtime_outlined,
+                  size: 20,
+                ),
+                label: Text(timerLabel),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'TXT, EPUB and text-based PDF',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ActiveNovelCard extends StatelessWidget {
   const _ActiveNovelCard({
     required this.importer,
@@ -1539,26 +1555,55 @@ class _ActiveNovelCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final novel = importer.activeNovel!;
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Card(
+      key: const ValueKey('active-book-card'),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(18),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              novel.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.auto_stories_outlined,
+                    color: colors.onPrimaryContainer,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'CURRENT BOOK',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        novel.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleLarge,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Chapter ${importer.activeChapterIndex + 1} of ${novel.chapters.length} - ${novel.sourceLabel}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             if (importer.activeChapter != null)
               Text(
                 importer.activeChapter!.title,
@@ -1566,23 +1611,34 @@ class _ActiveNovelCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   fontWeight: FontWeight.w600,
+                  height: 1.4,
                 ),
               ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 6),
+            Text(
+              '${importer.activeChapterIndex + 1} of ${novel.chapters.length} saved chapters - ${novel.sourceLabel}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 14),
             Row(
               children: [
-                IconButton.filledTonal(
+                IconButton.outlined(
                   tooltip: 'Previous chapter',
                   onPressed: importer.activeChapterIndex > 0
                       ? onPreviousChapter
                       : null,
-                  icon: const Icon(Icons.chevron_left),
+                  icon: const Icon(Icons.chevron_left_rounded),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton.tonalIcon(
                     onPressed: onOpenChapters,
-                    icon: const Icon(Icons.menu_book_outlined),
+                    icon: const Icon(
+                      Icons.format_list_bulleted_rounded,
+                      size: 20,
+                    ),
                     label: const Text(
                       'Chapters',
                       maxLines: 1,
@@ -1591,13 +1647,13 @@ class _ActiveNovelCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton.filledTonal(
+                IconButton.outlined(
                   tooltip: 'Next chapter',
                   onPressed:
                       importer.activeChapterIndex < novel.chapters.length - 1
                       ? onNextChapter
                       : null,
-                  icon: const Icon(Icons.chevron_right),
+                  icon: const Icon(Icons.chevron_right_rounded),
                 ),
               ],
             ),
@@ -1614,125 +1670,181 @@ class _NowReadingCard extends StatelessWidget {
     required this.chapterLabel,
     required this.onOpenParagraphs,
     required this.onOpenPopup,
+    required this.onVoiceSettings,
   });
 
   final TtsService ttsService;
   final String? chapterLabel;
   final VoidCallback onOpenParagraphs;
   final VoidCallback onOpenPopup;
+  final VoidCallback onVoiceSettings;
 
   @override
   Widget build(BuildContext context) {
-    final chapterText = chapterLabel == null || chapterLabel!.trim().isEmpty
-        ? 'Manual text'
-        : chapterLabel!;
-    final colorScheme = Theme.of(context).colorScheme;
-
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final surface = theme.cardTheme.color ?? colors.surface;
+    final canNavigate = ttsService.hasInitialized && !ttsService.switchingVoice;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Now reading',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: TextButton(
-                    key: const ValueKey('now-reading-full-view'),
-                    onPressed: onOpenPopup,
-                    child: const Text(
-                      'View full',
-                      maxLines: 2,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (ttsService.selectedVoice != null) ...[
-              SelectedVoiceLabel(service: ttsService),
-              const SizedBox(height: 14),
+      key: const ValueKey('now-reading-card'),
+      clipBehavior: Clip.antiAlias,
+      child: DecoratedBox(
+        key: const ValueKey('now-reading-surface'),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color.alphaBlend(colors.primary.withValues(alpha: .06), surface),
+              surface,
             ],
-            Text(
-              ttsService.paragraphCount == 0
-                  ? 'Ready when you are'
-                  : 'Paragraph ${ttsService.currentParagraphIndex + 1} of ${ttsService.paragraphCount}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.primary,
-                fontWeight: FontWeight.w600,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Now reading',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: TextButton(
+                      key: const ValueKey('now-reading-full-view'),
+                      onPressed: onOpenPopup,
+                      child: const Text(
+                        'View full',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            if (ttsService.paragraphCount > 0) ...[
+              Text(
+                'Paragraph ${ttsService.currentParagraphIndex + 1} of ${ttsService.paragraphCount}',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.primary,
+                ),
+              ),
               const SizedBox(height: 10),
               LinearProgressIndicator(
                 value: ttsService.playbackState == ReaderPlaybackState.completed
                     ? 1
                     : ttsService.currentParagraphIndex /
                           ttsService.paragraphCount,
+                minHeight: 3,
+                borderRadius: BorderRadius.circular(4),
                 semanticsLabel: 'Chapter reading progress',
               ),
-              const SizedBox(height: 8),
-              PlaybackStatus(service: ttsService),
-            ],
-            if (chapterLabel != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                chapterText,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurface,
-                  fontWeight: FontWeight.w700,
+              if (chapterLabel != null && chapterLabel!.trim().isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  chapterLabel!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurface,
+                    fontWeight: FontWeight.w700,
+                    height: 1.4,
+                  ),
                 ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.only(left: 12),
-              decoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(color: colorScheme.primary, width: 3),
-                ),
-              ),
-              child: Text(
-                ttsService.currentParagraph,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  height: 1.45,
-                  color: colorScheme.primary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            if (ttsService.paragraphCount > 0) ...[
+              ],
               const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
+              Container(
+                padding: const EdgeInsets.only(left: 12),
+                decoration: BoxDecoration(
+                  border: Border(
+                    left: BorderSide(color: colors.primary, width: 3),
+                  ),
+                ),
+                child: Text(
+                  ttsService.currentParagraph,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    height: 1.65,
+                    color: colors.primary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
                 children: [
-                  OutlinedButton.icon(
-                    key: const ValueKey('paragraph-picker'),
-                    onPressed: onOpenParagraphs,
-                    icon: const Icon(Icons.format_list_numbered),
-                    label: const Text('Play from paragraph'),
+                  IconButton(
+                    tooltip: 'Previous paragraph',
+                    onPressed:
+                        canNavigate && ttsService.currentParagraphIndex > 0
+                        ? () => unawaited(ttsService.playPreviousParagraph())
+                        : null,
+                    icon: const Icon(Icons.chevron_left_rounded),
+                  ),
+                  Expanded(
+                    child: TextButton.icon(
+                      key: const ValueKey('paragraph-picker'),
+                      onPressed: onOpenParagraphs,
+                      icon: const Icon(
+                        Icons.format_list_numbered_rounded,
+                        size: 18,
+                      ),
+                      label: const Text(
+                        'Play from paragraph',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Next paragraph',
+                    onPressed:
+                        canNavigate &&
+                            ttsService.currentParagraphIndex <
+                                ttsService.paragraphCount - 1
+                        ? () => unawaited(ttsService.playNextParagraph())
+                        : null,
+                    icon: const Icon(Icons.chevron_right_rounded),
                   ),
                 ],
               ),
+              if (ttsService.selectedVoice != null) ...[
+                const Divider(height: 20),
+                Tooltip(
+                  message: 'Voice & playback settings',
+                  child: Semantics(
+                    button: true,
+                    child: InkWell(
+                      onTap: onVoiceSettings,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: SelectedVoiceLabel(service: ttsService),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(
+                              Icons.tune_rounded,
+                              size: 20,
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

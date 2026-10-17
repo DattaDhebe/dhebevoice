@@ -13,6 +13,7 @@ class PlayerControls extends StatelessWidget {
     this.enabled = true,
     this.status,
     this.stopEnabled,
+    this.embedded = false,
   });
 
   final bool isPlaying;
@@ -25,6 +26,7 @@ class PlayerControls extends StatelessWidget {
   final bool enabled;
   final Widget? status;
   final bool? stopEnabled;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -69,12 +71,14 @@ class PlayerControls extends StatelessWidget {
     }
 
     final controls = Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: color.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.outlineVariant),
-      ),
+      padding: embedded ? EdgeInsets.zero : const EdgeInsets.all(8),
+      decoration: embedded
+          ? null
+          : BoxDecoration(
+              color: color.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.outlineVariant),
+            ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

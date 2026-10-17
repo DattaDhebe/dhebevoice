@@ -41,6 +41,8 @@ Default playback begins when the first segment is ready and prepares upcoming se
 
 Play, Pause, and Stop stay available while scrolling and in full reading views. Chapter controls move between chapters; paragraph controls move within the chapter. The current chapter and paragraph are tracked, and search results can start reading from a specific place.
 
+The home screen groups the current book and chapter above the compact editable text. Now reading stays below it, with previous/next paragraph arrows, Play from paragraph, and View full. Tap the selected-voice row to open voice and playback settings. While typing, the screen prioritizes the editor and keeps the playback dock accessible.
+
 Voice and language changes apply at the next speech segment without requiring manual Play. A paused reader stays paused. Neural reading positions are saved at segment boundaries, not at individual spoken words; reopening may repeat part of a segment.
 
 Notification, lock-screen, and Bluetooth controls use the same transport state as the in-app controls. A headphone disconnect pauses playback. Reconnecting alone does not start speech. A temporary audio interruption may pause and later resume speech only if you have not paused or stopped it; permanent audio-focus loss requires manual Play.

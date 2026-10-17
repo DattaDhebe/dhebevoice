@@ -184,6 +184,7 @@ Future<void> _withReader(
     audio.dispose();
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
+    tester.view.resetViewInsets();
     tester.platformDispatcher.clearTextScaleFactorTestValue();
     debugDefaultTargetPlatformOverride = null;
     await tester.pump();
@@ -294,6 +295,149 @@ void main() {
           textScale: scale,
         );
       });
+    }
+  }
+
+  testWidgets(
+    'home paragraph shortcuts keep the player pinned and open voice settings',
+    (tester) async {
+      await _withReader(tester, (h) async {
+        final player = find.byKey(const ValueKey('home-playback-controls'));
+        final before = tester.getRect(player);
+        await _scrollTo(tester, find.byTooltip('Next paragraph'));
+        expect(tester.getRect(player), before);
+        await h.capture(tester, 'home-listening-light');
+        await tester.tap(find.byTooltip('Next paragraph'));
+        await tester.pumpAndSettle();
+        expect(h.tts.currentParagraphIndex, 1);
+        expect(h.tts.isPlaying, isTrue);
+        await tester.tap(find.byTooltip('Previous paragraph'));
+        await tester.pumpAndSettle();
+        expect(h.tts.currentParagraphIndex, 0);
+        await tester.tap(find.byTooltip('Pause'));
+        await tester.pumpAndSettle();
+        expect(h.tts.isPaused, isTrue);
+        await _scrollTo(tester, find.byTooltip('Voice & playback settings'));
+        await tester.tap(find.byTooltip('Voice & playback settings'));
+        await tester.pumpAndSettle();
+        expect(find.text('Voice & playback'), findsOneWidget);
+        expect(h.tts.isPaused, isTrue);
+        expect(tester.takeException(), isNull);
+      });
+    },
+  );
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets(
+      'Now reading keeps passage contrast and neutral chapter title in $mode',
+      (tester) async {
+        await _withReader(tester, (h) async {
+          await h.theme.setThemeMode(mode);
+          await tester.pumpAndSettle();
+          final card = find.byKey(const ValueKey('now-reading-card'));
+          await _scrollTo(tester, card);
+          final surface = tester.widget<DecoratedBox>(
+            find.byKey(const ValueKey('now-reading-surface')),
+          );
+          final gradient = (surface.decoration as BoxDecoration).gradient!;
+          final colors = Theme.of(tester.element(card)).colorScheme;
+          final passage = tester.widget<Text>(
+            find.descendant(
+              of: card,
+              matching: find.text(h.tts.currentParagraph),
+            ),
+          );
+          expect(passage.style?.color, colors.primary);
+          final foreground = colors.primary.computeLuminance();
+          for (final backgroundColor in gradient.colors) {
+            final background = backgroundColor.computeLuminance();
+            final ratio = foreground > background
+                ? (foreground + .05) / (background + .05)
+                : (background + .05) / (foreground + .05);
+            expect(ratio, greaterThanOrEqualTo(4.5));
+          }
+          final chapter = tester.widget<Text>(
+            find.descendant(
+              of: card,
+              matching: find.text(h.importer.activeChapter!.title),
+            ),
+          );
+          expect(chapter.style?.color, colors.onSurface);
+          await h.capture(
+            tester,
+            'home-listening-${mode == ThemeMode.dark ? 'dark' : 'light'}',
+          );
+        });
+      },
+    );
+
+    testWidgets(
+      'empty home explains imports without showing an empty reading card in $mode',
+      (tester) async {
+        await _withReader(tester, (h) async {
+          await h.theme.setThemeMode(mode);
+          await tester.pumpAndSettle();
+          expect(find.text('What would you like to hear?'), findsOneWidget);
+          expect(find.text('Import file').hitTestable(), findsOneWidget);
+          expect(find.text('Web link').hitTestable(), findsOneWidget);
+          expect(find.byKey(const ValueKey('now-reading-card')), findsNothing);
+          final play = tester.widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Play'),
+          );
+          expect(play.onPressed, isNull);
+          expect(tester.takeException(), isNull);
+          await h.capture(
+            tester,
+            'home-empty-${mode == ThemeMode.dark ? 'dark' : 'light'}',
+          );
+        }, openBook: false);
+      },
+    );
+
+    for (final size in [const Size(320, 568), const Size(640, 360)]) {
+      testWidgets(
+        'home editor and player fit $size with keyboard and large text in $mode',
+        (tester) async {
+          await _withReader(
+            tester,
+            (h) async {
+              await h.theme.setThemeMode(mode);
+              await tester.pumpAndSettle();
+              final editor = find.byKey(const ValueKey('reading-editor'));
+              await _scrollTo(tester, editor);
+              await tester.enterText(
+                editor,
+                'First paragraph.\n\nSecond paragraph.',
+              );
+              tester.view.viewInsets = const FakeViewPadding(bottom: 180);
+              await tester.pumpAndSettle();
+              expect(h.tts.text, 'First paragraph.\n\nSecond paragraph.');
+              final editable = tester.state<EditableTextState>(
+                find.byType(EditableText),
+              );
+              expect(editable.widget.focusNode.hasFocus, isTrue);
+              expect(
+                find.byKey(const ValueKey('now-reading-card')),
+                findsNothing,
+              );
+              expect(find.byTooltip('Play').hitTestable(), findsOneWidget);
+              await tester.tap(find.byTooltip('Play'));
+              await tester.pumpAndSettle();
+              expect(h.tts.isPlaying, isTrue);
+              await tester.tap(find.byTooltip('Pause'));
+              await tester.pumpAndSettle();
+              expect(h.tts.isPaused, isTrue);
+              await tester.tap(find.byTooltip('Stop'));
+              await tester.pumpAndSettle();
+              expect(h.tts.isPlaying, isFalse);
+              expect(tester.takeException(), isNull);
+            },
+            size: size,
+            textScale: 2,
+            openBook: false,
+          );
+        },
+      );
     }
   }
 
