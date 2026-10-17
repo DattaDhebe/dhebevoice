@@ -90,6 +90,8 @@ class TtsService extends ChangeNotifier {
   Future<void> Function()? _playbackCompletedHandler;
   Timer? _playbackWatchdog;
   Timer? _unexpectedPauseRecoveryTimer;
+  Timer? _sleepTimer;
+  DateTime? _sleepTimerEndsAt;
   _PauseOrigin _pauseOrigin = _PauseOrigin.none;
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
 
@@ -112,6 +114,51 @@ class TtsService extends ChangeNotifier {
   bool get isInitializing => _isInitializing;
   bool get hasInitialized => _hasInitialized;
   int get playbackSessionId => _sessionId;
+  DateTime? get sleepTimerEndsAt => _sleepTimerEndsAt;
+
+  void setSleepTimer(Duration? duration) {
+    if (_isDisposed) return;
+    if (duration != null && duration <= Duration.zero) {
+      throw ArgumentError.value(duration, 'duration', 'Must be positive');
+    }
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepTimerEndsAt = duration == null ? null : DateTime.now().add(duration);
+    if (duration != null) {
+      _sleepTimer = Timer(duration, () => unawaited(_expireSleepTimer()));
+    }
+    notifyListeners();
+  }
+
+  Future<void> _expireSleepTimer() async {
+    _sleepTimer = null;
+    _sleepTimerEndsAt = null;
+    _resumeAfterInterruption = false;
+    _cancelUnexpectedPauseRecovery();
+    _pauseOrigin = _PauseOrigin.user;
+    if (isPlaying) {
+      final pauseSession = _sessionId + 1;
+      try {
+        await pause();
+      } catch (error) {
+        if (_isDisposed || _sessionId != pauseSession) return;
+        debugPrint('Sleep timer pause failed: $error');
+        try {
+          await _stopSpeech();
+          await _storageService.savePosition(_currentCharIndex);
+        } catch (error) {
+          _errorMessage =
+              'The sleep timer could not pause audio. Please use Stop.';
+          debugPrint('Sleep timer fallback failed: $error');
+        }
+        notifyListeners();
+      }
+    } else {
+      // Also invalidate a pending chapter transition or audio-focus request.
+      _sessionId++;
+      notifyListeners();
+    }
+  }
 
   void setPlaybackCompletedHandler(Future<void> Function()? handler) {
     _playbackCompletedHandler = handler;
@@ -120,7 +167,7 @@ class TtsService extends ChangeNotifier {
   String get currentParagraph {
     final items = paragraphs;
     if (items.isEmpty) {
-      return 'Paste text, import a .txt or .epub file, or share text into the app.';
+      return 'Paste text, import a TXT, EPUB or PDF file, or share a web link to get started.';
     }
 
     final index = min(_currentParagraphIndex, items.length - 1);
@@ -1369,6 +1416,7 @@ class TtsService extends ChangeNotifier {
     _becomingNoisySubscription?.cancel();
     _playbackWatchdog?.cancel();
     _unexpectedPauseRecoveryTimer?.cancel();
+    _sleepTimer?.cancel();
     unawaited(_flutterTts.stop());
     unawaited(_offlineEngine?.dispose());
     modelStore.dispose();

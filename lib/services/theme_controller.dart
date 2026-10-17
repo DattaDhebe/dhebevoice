@@ -4,11 +4,11 @@ import 'storage_service.dart';
 
 class ThemeController extends ChangeNotifier {
   ThemeController({required StorageService storageService})
-      : _storageService = storageService;
+    : _storageService = storageService;
 
   final StorageService _storageService;
 
-  ThemeMode _themeMode = ThemeMode.dark;
+  ThemeMode _themeMode = ThemeMode.system;
 
   ThemeMode get themeMode => _themeMode;
   bool get isLightMode => _themeMode == ThemeMode.light;
@@ -18,7 +18,7 @@ class ThemeController extends ChangeNotifier {
     _themeMode = switch (storedMode) {
       'light' => ThemeMode.light,
       'dark' => ThemeMode.dark,
-      _ => ThemeMode.dark,
+      _ => ThemeMode.system,
     };
     notifyListeners();
   }

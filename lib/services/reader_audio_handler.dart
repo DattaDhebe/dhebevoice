@@ -57,6 +57,7 @@ class ReaderAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> stop() async {
+    _ttsService.setSleepTimer(null);
     await _ttsService.stop();
     playbackState.add(
       playbackState.value.copyWith(

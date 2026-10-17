@@ -61,6 +61,7 @@ app.*.map.json
 
 # Android local Kotlin cache
 /android/.kotlin/
+/android/build/
 
 # Android signing files
 /android/key.properties

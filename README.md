@@ -45,12 +45,16 @@ Import behavior and limits:
 - `View full` popup for reading content
 - Text selection playback
 - Paragraph-aware progress tracking
+- Search paragraphs by text or number and play from the matching result
+- Confirm before replacing open text from the clipboard
 
 ### Library
 
 - Book List for imported books and web content
 - Chapter browser with current chapter tracking
 - Sample starter book for first-time users
+- Search books and chapters; pickers open around the current reading position
+- Confirm book deletion without leaving the Book List
 
 ### Playback
 
@@ -58,12 +62,15 @@ Import behavior and limits:
 - Background playback support
 - Lock-screen and notification media controls
 - Paragraph and chapter handoff support
+- A 15, 30, 45, or 60-minute sleep timer pauses without resetting your place. It continues across chapters and manual pauses; Stop cancels it. The timer lasts for the current app session.
+- Playback controls stay visible in both full-reading views
 
 ### Setup
 
 - First-run guide
 - Voice metadata labels
-- Light and dark theme support
+- Light, dark, and follow-device theme options
+- Consistent responsive layouts with narrow-screen and large-text widget tests
 
 ## Tech Stack
 

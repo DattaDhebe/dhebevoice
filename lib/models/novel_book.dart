@@ -12,11 +12,11 @@ class NovelChapter {
   final int order;
 
   Map<String, dynamic> toJson() => {
-        'title': title,
-        'url': url,
-        'content': content,
-        'order': order,
-      };
+    'title': title,
+    'url': url,
+    'content': content,
+    'order': order,
+  };
 
   factory NovelChapter.fromJson(Map<String, dynamic> json) {
     return NovelChapter(
@@ -45,6 +45,17 @@ class NovelBook {
   final List<NovelChapter> chapters;
   final int lastReadChapterIndex;
 
+  String get sourceLabel {
+    final source = Uri.tryParse(sourceUrl);
+    return switch (source?.scheme) {
+      'http' || 'https' => source!.host,
+      'sample' => 'Sample book',
+      'epub' || 'local-epub' => 'EPUB file',
+      'pdf' || 'local-pdf' => 'PDF file',
+      _ => 'Local file',
+    };
+  }
+
   NovelBook copyWith({
     String? id,
     String? title,
@@ -64,21 +75,19 @@ class NovelBook {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'sourceUrl': sourceUrl,
-        'importedAt': importedAt.toIso8601String(),
-        'lastReadChapterIndex': lastReadChapterIndex,
-        'chapters': chapters.map((chapter) => chapter.toJson()).toList(),
-      };
+    'id': id,
+    'title': title,
+    'sourceUrl': sourceUrl,
+    'importedAt': importedAt.toIso8601String(),
+    'lastReadChapterIndex': lastReadChapterIndex,
+    'chapters': chapters.map((chapter) => chapter.toJson()).toList(),
+  };
 
   factory NovelBook.fromJson(Map<String, dynamic> json) {
     final chapters = (json['chapters'] as List<dynamic>? ?? const [])
         .whereType<Map<dynamic, dynamic>>()
         .map(
-          (entry) => entry.map(
-            (key, value) => MapEntry(key.toString(), value),
-          ),
+          (entry) => entry.map((key, value) => MapEntry(key.toString(), value)),
         )
         .map(NovelChapter.fromJson)
         .toList();
@@ -87,7 +96,8 @@ class NovelBook {
       id: (json['id'] ?? '').toString(),
       title: (json['title'] ?? '').toString(),
       sourceUrl: (json['sourceUrl'] ?? '').toString(),
-      importedAt: DateTime.tryParse((json['importedAt'] ?? '').toString()) ??
+      importedAt:
+          DateTime.tryParse((json['importedAt'] ?? '').toString()) ??
           DateTime.now(),
       lastReadChapterIndex:
           (json['lastReadChapterIndex'] as num?)?.toInt() ?? 0,

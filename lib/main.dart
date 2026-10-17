@@ -20,6 +20,8 @@ import 'services/web_novel_import_service.dart';
 
 const _playbackChannelId = 'com.dhebe.dhebevoice.playback.v5';
 const _systemChannel = MethodChannel('com.dhebe.dhebevoice/system');
+final _lightTheme = _buildTheme(brightness: Brightness.light);
+final _darkTheme = _buildTheme(brightness: Brightness.dark);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -110,6 +112,7 @@ Future<void> _initializeAudioHandler({
         androidNotificationChannelName: 'DhebeVoice Playback',
         androidNotificationChannelDescription:
             'Playback controls for DhebeVoice reading sessions',
+        androidNotificationIcon: 'drawable/dhebevoice_mark_monochrome',
         androidNotificationOngoing: false,
         androidStopForegroundOnPause: false,
       ),
@@ -159,8 +162,8 @@ class TextReaderApp extends StatelessWidget {
           return MaterialApp(
             title: 'DhebeVoice',
             debugShowCheckedModeBanner: false,
-            theme: _buildTheme(brightness: Brightness.light),
-            darkTheme: _buildTheme(brightness: Brightness.dark),
+            theme: _lightTheme,
+            darkTheme: _darkTheme,
             themeMode: controller.themeMode,
             home: const HomeScreen(),
           );
@@ -190,6 +193,10 @@ ThemeData _buildTheme({required Brightness brightness}) {
           secondary: const Color(0xFF8ED7E6),
           onSecondary: const Color(0xFF003640),
           surface: const Color(0xFF141B22),
+          surfaceContainerLow: const Color(0xFF10202D),
+          surfaceContainer: const Color(0xFF182A3A),
+          surfaceContainerHigh: const Color(0xFF203446),
+          surfaceContainerHighest: const Color(0xFF2A4055),
           onSurface: const Color(0xFFF2F6FC),
           onSurfaceVariant: const Color(0xFFC7D2E2),
           outline: const Color(0xFF8D9AAF),
@@ -205,6 +212,10 @@ ThemeData _buildTheme({required Brightness brightness}) {
           secondary: const Color(0xFF006B79),
           onSecondary: Colors.white,
           surface: Colors.white,
+          surfaceContainerLow: const Color(0xFFF4F8FC),
+          surfaceContainer: const Color(0xFFEDF3F9),
+          surfaceContainerHigh: const Color(0xFFE5EEF7),
+          surfaceContainerHighest: const Color(0xFFDCE7F2),
           onSurface: const Color(0xFF121A27),
           onSurfaceVariant: const Color(0xFF3A485B),
           outline: const Color(0xFF66768B),
@@ -218,6 +229,39 @@ ThemeData _buildTheme({required Brightness brightness}) {
     brightness: brightness,
     colorScheme: colorScheme,
     scaffoldBackgroundColor: scaffoldColor,
+    textTheme: const TextTheme(
+      titleLarge: TextStyle(
+        fontSize: 22,
+        fontWeight: FontWeight.w700,
+        height: 1.25,
+      ),
+      titleMedium: TextStyle(
+        fontSize: 17,
+        fontWeight: FontWeight.w700,
+        height: 1.3,
+      ),
+      labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+    ),
+    listTileTheme: ListTileThemeData(
+      selectedTileColor: colorScheme.primaryContainer,
+      selectedColor: colorScheme.onPrimaryContainer,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+    ),
     appBarTheme: const AppBarTheme(
       centerTitle: false,
       backgroundColor: Colors.transparent,
@@ -225,12 +269,13 @@ ThemeData _buildTheme({required Brightness brightness}) {
     ),
     cardTheme: CardThemeData(
       color: cardColor,
-      elevation: isDark ? 0 : 2,
+      elevation: 0,
+      margin: EdgeInsets.zero,
       shadowColor: isDark
           ? Colors.transparent
           : const Color(0xFF91A6C6).withValues(alpha: 0.18),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         side: BorderSide(
           color: isDark
               ? colorScheme.outlineVariant
@@ -243,11 +288,11 @@ ThemeData _buildTheme({required Brightness brightness}) {
       fillColor: inputFillColor,
       hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
           color: isDark
               ? colorScheme.outlineVariant
@@ -255,10 +300,10 @@ ThemeData _buildTheme({required Brightness brightness}) {
         ),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
       ),
-      contentPadding: const EdgeInsets.all(20),
+      contentPadding: const EdgeInsets.all(16),
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: cardColor,

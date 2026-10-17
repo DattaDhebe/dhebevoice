@@ -52,6 +52,10 @@ android {
 
     buildTypes {
         release {
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -76,4 +80,40 @@ dependencies {
 // A newer local Java executable can be used for JVM tests without changing the Android build JDK.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     System.getenv("DHEBEVOICE_TEST_JAVA")?.let { executable = it }
+}
+
+// JVM/debug tests do not run R8, so also inspect the actual release mapping.
+val verifyReleaseOnnxBindings by tasks.registering {
+    group = "verification"
+    description = "Verify that release optimization preserves ONNX JNI bindings."
+    dependsOn(tasks.matching { it.name == "minifyReleaseWithR8" })
+    onlyIf { android.buildTypes.getByName("release").isMinifyEnabled }
+    val mapping = layout.buildDirectory.file("outputs/mapping/release/mapping.txt")
+    inputs.file(mapping)
+    doLast {
+        val classes = mapping.get().asFile.useLines { lines ->
+            lines.filter { it.startsWith("ai.onnxruntime.") && it.endsWith(":") }
+                .map { it.removeSuffix(":").split(" -> ") }
+                .filterNot { it[0].contains("\$\$ExternalSynthetic") }
+                .associate { it[0] to it[1] }
+        }
+        val required = listOf(
+            "ai.onnxruntime.OnnxTensor",
+            "ai.onnxruntime.TensorInfo",
+            "ai.onnxruntime.OnnxJavaType",
+            "ai.onnxruntime.OrtException",
+            "ai.onnxruntime.OrtSession",
+            "ai.onnxruntime.OrtEnvironment",
+            "ai.onnxruntime.NodeInfo",
+            "ai.onnxruntime.ValueInfo",
+        )
+        check(required.all { classes[it] == it } && classes.all { it.key == it.value }) {
+            "ONNX JNI classes were removed or renamed. Check app/proguard-rules.pro before releasing."
+        }
+        logger.lifecycle("Verified release ONNX JNI bindings retain their original class names.")
+    }
+}
+
+tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+    dependsOn(verifyReleaseOnnxBindings)
 }

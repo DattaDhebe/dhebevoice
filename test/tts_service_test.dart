@@ -146,6 +146,115 @@ void main() {
     expect(service.playbackState, ReaderPlaybackState.stopped);
   });
 
+  testWidgets(
+    'sleep expiry prevents a pending chapter transition from restarting audio',
+    (tester) async {
+      try {
+        await importer.selectNovel('test-book');
+        await service.play();
+        engine.startHandler!();
+        storage.chapterBarrier = Completer<void>();
+        service.setSleepTimer(const Duration(seconds: 1));
+        engine.completionHandler!();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        storage.chapterBarrier!.complete();
+        await tester.pump();
+        expect(service.sleepTimerEndsAt, isNull);
+        expect(service.isPlaying, isFalse);
+        expect(spoken, ['First chapter.']);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets(
+    'sleep expiry falls back to stopping speech if native pause fails',
+    (tester) async {
+      try {
+        const text = 'First paragraph for bedtime listening.';
+        await service.updateText(text);
+        await service.play();
+        engine.startHandler!();
+        engine.progressHandler!(text, 6, 15, 'paragraph');
+        var stops = 0;
+        messenger.setMockMethodCallHandler(ttsChannel, (call) async {
+          if (call.method == 'pause') {
+            throw PlatformException(code: 'pause_failed');
+          }
+          if (call.method == 'stop') stops++;
+          return 1;
+        });
+        service.setSleepTimer(const Duration(seconds: 1));
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump();
+        expect(stops, 1);
+        expect(service.isPaused, isTrue);
+        expect(service.currentCharIndex, 6);
+        expect(storage.position, 6);
+        expect(service.errorMessage, isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets('sleep timer pauses at the saved position and allows resume', (
+    tester,
+  ) async {
+    const text = 'First paragraph for bedtime listening.';
+    await service.updateText(text);
+    await service.play();
+    engine.startHandler!();
+    engine.progressHandler!(text, 6, 15, 'paragraph');
+    service.setSleepTimer(const Duration(minutes: 15));
+    await tester.pump(const Duration(minutes: 15));
+    await tester.pump();
+    expect(service.sleepTimerEndsAt, isNull);
+    expect(service.isPaused, isTrue);
+    expect(service.currentCharIndex, 6);
+    expect(storage.position, 6);
+    await service.play();
+    expect(service.isPlaying, isTrue);
+    expect(spoken.last, text.substring(6));
+    await service.stop();
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets(
+    'replacing and cancelling sleep timers invalidates old deadlines',
+    (tester) async {
+      service.setSleepTimer(const Duration(minutes: 15));
+      service.setSleepTimer(const Duration(minutes: 30));
+      await tester.pump(const Duration(minutes: 15));
+      expect(service.sleepTimerEndsAt, isNotNull);
+      service.setSleepTimer(null);
+      final session = service.playbackSessionId;
+      await tester.pump(const Duration(minutes: 30));
+      expect(service.sleepTimerEndsAt, isNull);
+      expect(service.playbackSessionId, session);
+      expect(() => service.setSleepTimer(Duration.zero), throwsArgumentError);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets('media Stop cancels a timer but chapter changes preserve it', (
+    tester,
+  ) async {
+    service.setSleepTimer(const Duration(minutes: 30));
+    await importer.selectNovel('test-book');
+    await importer.selectChapter(1);
+    expect(service.sleepTimerEndsAt, isNotNull);
+    final handler = ReaderAudioHandler(
+      ttsService: service,
+      novelImportController: importer,
+    );
+    await handler.stop();
+    expect(service.sleepTimerEndsAt, isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   test(
     'chapter autoplay advances without rewriting the book library',
     () async {

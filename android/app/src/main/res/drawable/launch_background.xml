@@ -7,9 +7,9 @@
         </shape>
     </item>
 
-    <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/ic_launcher" />
-    </item>
+    <item
+        android:gravity="center"
+        android:width="112dp"
+        android:height="112dp"
+        android:drawable="@drawable/dhebevoice_mark" />
 </layer-list>

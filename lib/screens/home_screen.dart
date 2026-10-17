@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
@@ -11,7 +11,12 @@ import '../services/novel_import_controller.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../widgets/player_controls.dart';
+import '../widgets/reader_consumer.dart';
+import '../widgets/reader_list_sheet.dart';
+import '../widgets/reader_view_dialog.dart';
 import 'settings_screen.dart';
+
+enum _ReaderAction { importFile, sleepTimer, settings, guide }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -64,18 +69,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _showFirstRunGuideIfNeeded() async {
+  Future<void> _showFirstRunGuideIfNeeded({bool force = false}) async {
     if (!mounted) {
       return;
     }
 
     final storage = context.read<StorageService>();
-    if (storage.hasSeenHomeGuide) {
+    if (storage.hasSeenHomeGuide && !force) {
       return;
     }
 
     await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted) {
+      return;
+    }
+    if (!force &&
+        (_isImportSetupDialogOpen ||
+            context.read<NovelImportController>().hasPendingSharedUrl)) {
       return;
     }
 
@@ -87,6 +97,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       builder: (context) {
         return AlertDialog(
+          scrollable: true,
           title: const Text('Welcome to DhebeVoice'),
           content: SizedBox(
             width: 360,
@@ -190,12 +201,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _showImportUrlDialog() async {
     final importer = context.read<NovelImportController>();
+    if (importer.isImporting) {
+      setState(() => _isImportDialogMinimized = false);
+      return;
+    }
     if (_isImportSetupDialogOpen) {
       return;
     }
     final controller = TextEditingController(
       text: importer.pendingSharedUrl ?? '',
     );
+    final formKey = GlobalKey<FormState>();
     _isImportSetupDialogOpen = true;
 
     try {
@@ -205,26 +221,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return AlertDialog(
             scrollable: true,
             title: const Text('Import web link'),
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    hintText: 'Paste web page URL',
+            content: Form(
+              key: formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: controller,
+                    autofocus: !importer.hasPendingSharedUrl,
+                    keyboardType: TextInputType.url,
+                    minLines: 1,
+                    maxLines: 3,
+                    autocorrect: false,
+                    validator: (value) {
+                      final uri = Uri.tryParse(value?.trim() ?? '');
+                      return uri != null &&
+                              (uri.scheme == 'https' || uri.scheme == 'http') &&
+                              uri.host.isNotEmpty
+                          ? null
+                          : 'Enter a complete http or https web link.';
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Web page URL',
+                      hintText: 'https://example.com/page',
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Import only text you own, are licensed to access, or that is in the public domain.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  const SizedBox(height: 12),
+                  Text(
+                    'Import only text you own, are licensed to access, or that is in the public domain.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -233,8 +264,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               FilledButton(
                 onPressed: () async {
+                  if (formKey.currentState?.validate() != true) return;
+                  final url = controller.text.trim();
                   Navigator.of(context).pop();
-                  await importer.importNovelFromUrl(controller.text);
+                  await importer.importNovelFromUrl(url);
                 },
                 child: const Text('Start import'),
               ),
@@ -249,376 +282,273 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showLibrarySheet() {
-    final importer = context.read<NovelImportController>();
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) {
-        return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.72,
-            child: importer.library.isEmpty
-                ? const Center(
-                    child: Text(
-                      'Imported books and web pages will appear here.',
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: importer.library.length + 1,
-                    itemBuilder: (context, index) {
-                      if (index == 0) {
-                        return Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                          child: Text(
-                            'Book List',
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        );
-                      }
-
-                      final book = importer.library[index - 1];
-                      return ListTile(
-                        title: Text(book.title),
-                        subtitle: Text(
-                          '${book.chapters.length} chapters • ${Uri.tryParse(book.sourceUrl)?.host ?? book.sourceUrl}',
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () async {
-                            await importer.deleteNovel(book.id);
-                            if (context.mounted) {
-                              Navigator.of(context).pop();
-                            }
-                          },
-                        ),
-                        onTap: () async {
-                          await importer.selectNovel(book.id);
-                          if (context.mounted) {
-                            Navigator.of(context).pop();
-                          }
-                        },
-                      );
-                    },
-                  ),
+      useSafeArea: true,
+      builder: (context) => Consumer<NovelImportController>(
+        builder: (context, importer, _) => ReaderListSheet<NovelBook>(
+          title: 'Book List',
+          items: importer.library,
+          selectedIndex: importer.library.indexWhere(
+            (book) => book.id == importer.activeNovel?.id,
           ),
-        );
-      },
+          itemExtent: 112,
+          searchHint: 'Search books',
+          emptyMessage:
+              'Your imported books and web pages will appear here. Use Import file or Web link to add one.',
+          searchText: (book, _) => '${book.title} ${book.sourceLabel}',
+          itemBuilder: (context, book, _) => ListTile(
+            selected: book.id == importer.activeNovel?.id,
+            leading: Icon(
+              book.id == importer.activeNovel?.id
+                  ? Icons.bookmark
+                  : Icons.menu_book_outlined,
+            ),
+            title: Text(
+              book.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              '${book.chapters.length} chapters - ${book.sourceLabel}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: IconButton(
+              tooltip: 'Delete ${book.title}',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => unawaited(_confirmDeleteBook(book)),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              unawaited(importer.selectNovel(book.id));
+            },
+          ),
+        ),
+      ),
     );
   }
 
-  void _showChapterSheet() {
+  Future<void> _confirmDeleteBook(NovelBook book) async {
     final importer = context.read<NovelImportController>();
-    final novel = importer.activeNovel;
-    if (novel == null) {
-      return;
-    }
-    final selectedIndex = importer.activeChapterIndex;
-    final controller = ScrollController(
-      initialScrollOffset: max(0.0, (selectedIndex - 2) * 72.0),
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: const Text('Delete book?'),
+        content: Text(
+          'Remove "${book.title}" from your Book List? This cannot be undone. Text already open in the reader will remain until you replace it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
+    if (confirmed != true) return;
+    try {
+      await importer.deleteNovel(book.id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not delete the book. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
 
+  void _showChapterSheet() {
+    if (context.read<NovelImportController>().activeNovel == null) return;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) {
-        return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.72,
-            child: ListView.builder(
-              controller: controller,
-              itemExtent: 72,
-              itemCount: novel.chapters.length,
-              itemBuilder: (context, index) {
-                final chapter = novel.chapters[index];
-                final chapterBadge = _chapterBadgeLabel(chapter, index);
-                return ListTile(
-                  selected: index == importer.activeChapterIndex,
-                  title: Row(
-                    children: [
-                      SizedBox(
-                        width: 78,
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: _ChapterBadge(label: chapterBadge),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          chapter.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    unawaited(importer.selectChapter(index));
-                  },
-                );
-              },
+      useSafeArea: true,
+      builder: (context) => Consumer<NovelImportController>(
+        builder: (context, importer, _) => ReaderListSheet<NovelChapter>(
+          title: 'Chapters',
+          items: importer.activeNovel?.chapters ?? const [],
+          selectedIndex: importer.activeChapterIndex,
+          itemExtent: 88,
+          searchHint: 'Search chapter name or number',
+          searchText: (chapter, index) =>
+              '${_chapterBadgeLabel(chapter, index)} ${chapter.title}',
+          itemBuilder: (context, chapter, index) => ListTile(
+            selected: index == importer.activeChapterIndex,
+            leading: SizedBox(
+              width: 62,
+              child: _ChapterBadge(label: _chapterBadgeLabel(chapter, index)),
             ),
+            title: Text(
+              chapter.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: index == importer.activeChapterIndex
+                ? const Icon(Icons.bookmark, size: 20)
+                : null,
+            onTap: () {
+              Navigator.pop(context);
+              unawaited(importer.selectChapter(index));
+            },
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
   void _showParagraphSheet() {
-    final ttsService = context.read<TtsService>();
-    if (ttsService.paragraphCount == 0) {
-      return;
-    }
-    final selectedIndex = ttsService.currentParagraphIndex;
-    final controller = ScrollController(
-      initialScrollOffset: max(0.0, (selectedIndex - 2) * 88.0),
-    );
-
+    if (context.read<TtsService>().paragraphCount == 0) return;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) {
-        return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.72,
-            child: ListView.builder(
-              controller: controller,
-              itemExtent: 88,
-              itemCount: ttsService.paragraphCount,
-              itemBuilder: (context, index) {
-                final preview = ttsService.paragraphs[index];
-                return ListTile(
-                  selected: index == ttsService.currentParagraphIndex,
-                  leading: _ChapterBadge(label: '#P${index + 1}'),
-                  title: Text(
-                    'Paragraph ${index + 1}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    preview,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    unawaited(ttsService.playFromParagraph(index));
-                  },
-                );
-              },
+      useSafeArea: true,
+      builder: (context) => ReaderConsumer(
+        builder: (context, service) => ReaderListSheet<String>(
+          title: 'Play from paragraph',
+          items: service.paragraphs,
+          selectedIndex: service.currentParagraphIndex,
+          itemExtent: 112,
+          searchHint: 'Search paragraph text or number',
+          searchText: (paragraph, index) => '${index + 1} $paragraph',
+          itemBuilder: (context, paragraph, index) => ListTile(
+            selected: index == service.currentParagraphIndex,
+            leading: _ChapterBadge(label: '${index + 1}'),
+            title: Text(
+              'Paragraph ${index + 1}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
+            subtitle: Text(
+              paragraph,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              unawaited(service.playFromParagraph(index));
+            },
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  void _showReaderPopup() {
+  void _showReaderPopup() => _showReadingView(fullContent: false);
+  void _showContentPopup() => _showReadingView(fullContent: true);
+
+  void _showReadingView({required bool fullContent}) {
+    FocusManager.instance.primaryFocus?.unfocus();
     showDialog<void>(
       context: context,
-      builder: (context) {
-        final dialogWidth = min(MediaQuery.sizeOf(context).width * 0.9, 620.0);
-        final dialogHeight = min(
-          MediaQuery.sizeOf(context).height * 0.6,
-          540.0,
-        );
-
-        return Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 24,
-          ),
-          child: SizedBox(
-            width: dialogWidth,
-            height: dialogHeight,
-            child: Consumer2<NovelImportController, TtsService>(
-              builder: (context, importer, ttsService, _) {
-                final colorScheme = Theme.of(context).colorScheme;
-                final activeTitle = importer.activeChapter?.title ?? '';
-                final chapterText = activeTitle.trim().isNotEmpty
-                    ? activeTitle
-                    : 'Manual text';
-
-                return Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Now reading',
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Close',
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        chapterText,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          IconButton.filledTonal(
-                            onPressed: ttsService.currentParagraphIndex > 0
-                                ? () => unawaited(
-                                    ttsService.playPreviousParagraph(),
-                                  )
-                                : null,
-                            icon: const Icon(Icons.chevron_left),
-                          ),
-                          Expanded(
-                            child: Text(
-                              'Paragraph ${ttsService.currentParagraphIndex + 1}',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ),
-                          IconButton.filledTonal(
-                            onPressed:
-                                ttsService.currentParagraphIndex <
-                                    ttsService.paragraphCount - 1
-                                ? () =>
-                                      unawaited(ttsService.playNextParagraph())
-                                : null,
-                            icon: const Icon(Icons.chevron_right),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Text(
-                            ttsService.currentParagraph,
-                            style: Theme.of(context).textTheme.bodyLarge
-                                ?.copyWith(
-                                  height: 1.6,
-                                  color: colorScheme.primary,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      PlayerControls(
-                        isPlaying: ttsService.isPlaying,
-                        canResume:
-                            ttsService.isPaused ||
-                            ttsService.currentCharIndex > 0,
-                        onPlay: () =>
-                            unawaited(_playUsingBestAvailableController()),
-                        onPause: () =>
-                            unawaited(_pauseUsingBestAvailableController()),
-                        onStop: () =>
-                            unawaited(_stopUsingBestAvailableController()),
-                        wrapInSafeArea: false,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
+      builder: (_) => ReaderViewDialog(
+        fullContent: fullContent,
+        onPlay: () => unawaited(_playUsingBestAvailableController()),
+        onPause: () => unawaited(_pauseUsingBestAvailableController()),
+        onStop: () => unawaited(_stopUsingBestAvailableController()),
+      ),
     );
   }
 
-  void _showContentPopup() {
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        final dialogWidth = min(MediaQuery.sizeOf(context).width * 0.94, 760.0);
-        final dialogHeight = min(
-          MediaQuery.sizeOf(context).height * 0.76,
-          680.0,
-        );
-        final contentText = _textController.text.trim().isEmpty
-            ? 'Paste text here, import a file, or share a web link from your browser.'
-            : _textController.text;
-
-        return Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 24,
+  Future<void> _replaceEditorText(String value) async {
+    final service = context.read<TtsService>();
+    final importer = context.read<NovelImportController>();
+    if (service.text.trim().isNotEmpty) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Replace reading text?'),
+          content: const Text(
+            'This stops playback and replaces the open text. Imported books stay in your Book List with their saved reading position.',
           ),
-          child: SizedBox(
-            width: dialogWidth,
-            height: dialogHeight,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Reading content',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close',
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Replace'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    await importer.clearActiveNovel();
+    await service.updateText(value, resetPosition: true);
+  }
+
+  Future<void> _pasteText() async {
+    final value = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    if (!mounted) return;
+    if (value == null || value.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The clipboard does not contain text.')),
+      );
+      return;
+    }
+    await _replaceEditorText(value);
+  }
+
+  void _showSleepTimer() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => ReaderConsumer(
+        builder: (context, service) => SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Sleep timer',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Pause automatically without losing your place. The timer continues if you pause or change chapters.',
+                ),
+                const SizedBox(height: 16),
+                for (final minutes in [15, 30, 45, 60])
+                  ListTile(
+                    leading: const Icon(Icons.bedtime_outlined),
+                    title: Text('$minutes minutes'),
+                    onTap: () {
+                      service.setSleepTimer(Duration(minutes: minutes));
+                      Navigator.pop(context);
+                    },
                   ),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerLow,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.outlineVariant,
-                        ),
-                      ),
-                      child: SelectionArea(
-                        child: SingleChildScrollView(
-                          child: Text(
-                            contentText,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyLarge?.copyWith(height: 1.55),
-                          ),
-                        ),
-                      ),
-                    ),
+                if (service.sleepTimerEndsAt != null)
+                  TextButton.icon(
+                    onPressed: () {
+                      service.setSleepTimer(null);
+                      Navigator.pop(context);
+                    },
+                    icon: const Icon(Icons.timer_off_outlined),
+                    label: const Text('Turn off timer'),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -681,6 +611,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _stopUsingBestAvailableController() async {
+    context.read<TtsService>().setSleepTimer(null);
     final audioHandler = context.read<AudioHandlerController>().audioHandler;
     if (audioHandler != null) {
       await audioHandler.stop();
@@ -793,325 +724,477 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<NovelImportController, TtsService>(
-      builder: (context, importer, ttsService, _) {
-        _syncImportDialog(importer);
-        final isKeyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-        final audioHandlerController = context.watch<AudioHandlerController>();
-        final controlsReady =
-            ttsService.hasInitialized && audioHandlerController.isReady;
-        final startupError =
-            audioHandlerController.errorMessage ?? ttsService.errorMessage;
+    return ReaderConsumer(
+      builder: (context, ttsService) => Consumer<NovelImportController>(
+        builder: (context, importer, _) {
+          _syncImportDialog(importer);
+          final isKeyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+          final audioHandlerController = context
+              .watch<AudioHandlerController>();
+          final controlsReady = ttsService.hasInitialized;
+          final servicesReady = controlsReady && audioHandlerController.isReady;
+          final startupError =
+              audioHandlerController.errorMessage ?? ttsService.errorMessage;
 
-        if (_textController.text != ttsService.text) {
-          _textController.value = TextEditingValue(
-            text: ttsService.text,
-            selection: TextSelection.collapsed(offset: ttsService.text.length),
-          );
-        }
+          if (_textController.text != ttsService.text) {
+            _textController.value = TextEditingValue(
+              text: ttsService.text,
+              selection: TextSelection.collapsed(
+                offset: ttsService.text.length,
+              ),
+            );
+          }
 
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('DhebeVoice'),
-            actions: [
-              IconButton(
-                tooltip: 'Import web link',
-                onPressed: _showImportUrlDialog,
-                icon: Badge(
-                  isLabelVisible: importer.hasPendingSharedUrl,
-                  child: const Icon(Icons.link),
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text(
+                'DhebeVoice',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              actions: [
+                IconButton(
+                  tooltip: 'Import web link',
+                  onPressed: _showImportUrlDialog,
+                  icon: Badge(
+                    isLabelVisible: importer.hasPendingSharedUrl,
+                    child: const Icon(Icons.link),
+                  ),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Library',
-                onPressed: _showLibrarySheet,
-                icon: Badge(
-                  isLabelVisible: importer.library.isNotEmpty,
-                  label: Text('${importer.library.length}'),
-                  child: const Icon(Icons.library_books_outlined),
+                IconButton(
+                  tooltip: 'Library',
+                  onPressed: _showLibrarySheet,
+                  icon: Badge(
+                    isLabelVisible: importer.library.isNotEmpty,
+                    label: Text('${importer.library.length}'),
+                    child: const Icon(Icons.library_books_outlined),
+                  ),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Import .txt, .epub, or .pdf file',
-                onPressed: importer.isImporting
-                    ? null
-                    : () async {
-                        await importer.importLocalFile();
-                      },
-                icon: const Icon(Icons.upload_file),
-              ),
-              IconButton(
-                tooltip: 'Settings',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  );
-                },
-                icon: const Icon(Icons.tune),
-              ),
-            ],
-          ),
-          bottomNavigationBar: SafeArea(
-            top: false,
-            minimum: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Opacity(
-              opacity: controlsReady ? 1 : 0.7,
-              child: IgnorePointer(
-                ignoring: !controlsReady,
-                child: PlayerControls(
-                  isPlaying: ttsService.isPlaying,
-                  canResume:
-                      ttsService.isPaused || ttsService.currentCharIndex > 0,
-                  onPlay: () => unawaited(_playUsingBestAvailableController()),
-                  onPause: () =>
-                      unawaited(_pauseUsingBestAvailableController()),
-                  onStop: () => unawaited(_stopUsingBestAvailableController()),
+                PopupMenuButton<_ReaderAction>(
+                  tooltip: 'More options',
+                  icon: Badge(
+                    isLabelVisible: ttsService.sleepTimerEndsAt != null,
+                    child: const Icon(Icons.more_vert),
+                  ),
+                  onSelected: (action) {
+                    switch (action) {
+                      case _ReaderAction.importFile:
+                        unawaited(importer.importLocalFile());
+                      case _ReaderAction.sleepTimer:
+                        _showSleepTimer();
+                      case _ReaderAction.settings:
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const SettingsScreen(),
+                          ),
+                        );
+                      case _ReaderAction.guide:
+                        unawaited(_showFirstRunGuideIfNeeded(force: true));
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: _ReaderAction.importFile,
+                      enabled: !importer.isImporting,
+                      child: const ListTile(
+                        leading: Icon(Icons.upload_file_outlined),
+                        title: Text('Import file'),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderAction.sleepTimer,
+                      child: ListTile(
+                        leading: const Icon(Icons.bedtime_outlined),
+                        title: const Text('Sleep timer'),
+                        subtitle: ttsService.sleepTimerEndsAt == null
+                            ? null
+                            : Text(
+                                'Pause at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(ttsService.sleepTimerEndsAt!))}',
+                              ),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderAction.settings,
+                      child: ListTile(
+                        leading: Icon(Icons.tune),
+                        title: Text('Settings'),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderAction.guide,
+                      child: ListTile(
+                        leading: Icon(Icons.help_outline),
+                        title: Text('Getting started'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            bottomNavigationBar: SafeArea(
+              top: false,
+              minimum: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Center(
+                heightFactor: 1,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 840),
+                  child: PlayerControls(
+                    enabled:
+                        controlsReady &&
+                        !ttsService.switchingVoice &&
+                        ttsService.paragraphCount > 0,
+                    isPlaying: ttsService.isPlaying,
+                    canResume:
+                        ttsService.isPaused || ttsService.currentCharIndex > 0,
+                    onPlay: () =>
+                        unawaited(_playUsingBestAvailableController()),
+                    onPause: () =>
+                        unawaited(_pauseUsingBestAvailableController()),
+                    onStop: () =>
+                        unawaited(_stopUsingBestAvailableController()),
+                    wrapInSafeArea: false,
+                  ),
                 ),
               ),
             ),
-          ),
-          body: SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final editorHeight = isKeyboardOpen
-                    ? 220.0
-                    : (constraints.maxHeight * 0.38).clamp(260.0, 460.0);
+            body: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final editorHeight = isKeyboardOpen
+                      ? 300.0
+                      : (constraints.maxHeight * 0.42).clamp(320.0, 480.0);
+                  final textScale = MediaQuery.textScalerOf(
+                    context,
+                  ).scale(1).clamp(1.0, 2.5);
 
-                return ListView(
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  children: [
-                    if (startupError != null) ...[
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: Text(
-                            startupError,
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (startupError == null && !controlsReady) ...[
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: Row(
-                            children: [
-                              const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.6,
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Text(
-                                  'Preparing voices and playback controls…',
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                              ),
-                              if (!audioHandlerController.isReady)
-                                Text(
-                                  'Starting',
-                                  style: Theme.of(context).textTheme.labelMedium
-                                      ?.copyWith(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    if (importer.isImporting && _isImportDialogMinimized)
-                      _ImportMiniBar(
-                        importer: importer,
-                        onOpenProgress: () {
-                          setState(() {
-                            _isImportDialogMinimized = false;
-                          });
-                        },
-                        onStop: () => unawaited(importer.cancelImport()),
-                      ),
-                    if (!importer.isImporting && importer.hasPendingSharedUrl)
-                      _ImportStatusCard(
-                        importer: importer,
-                        onStartImport: _showImportUrlDialog,
-                        onStartPendingImport: () =>
-                            unawaited(importer.importPendingSharedUrl()),
-                        onClearSharedLink: () =>
-                            unawaited(importer.clearPendingSharedUrl()),
-                      ),
-                    if (!importer.isImporting &&
-                        !importer.hasPendingSharedUrl &&
-                        (importer.importStatus != null ||
-                            importer.errorMessage != null))
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  [
-                                    if (importer.importStatus != null)
-                                      importer.importStatus!,
-                                    if (importer.errorMessage != null)
-                                      importer.errorMessage!,
-                                  ].join('\n'),
-                                  style: importer.errorMessage == null
-                                      ? null
-                                      : TextStyle(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.error,
-                                        ),
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Dismiss import message',
-                                onPressed: importer.clearImportMessage,
-                                icon: const Icon(Icons.close),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (importer.activeNovel != null) ...[
-                      if (importer.isImporting && _isImportDialogMinimized)
-                        const SizedBox(height: 16)
-                      else if (!importer.isImporting &&
-                          importer.hasPendingSharedUrl)
-                        const SizedBox(height: 16),
-                      _ActiveNovelCard(
-                        importer: importer,
-                        onOpenChapters: _showChapterSheet,
-                        onPreviousChapter: () => unawaited(
-                          _skipToPreviousUsingBestAvailableController(),
-                        ),
-                        onNextChapter: () => unawaited(
-                          _skipToNextUsingBestAvailableController(),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: editorHeight,
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
+                  return Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 880),
+                      child: ListView(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        children: [
+                          if (importer.activeNovel == null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
                                 children: [
-                                  Expanded(
-                                    child: Text(
-                                      'Reading content',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w800,
+                                  FilledButton.icon(
+                                    onPressed: importer.isImporting
+                                        ? null
+                                        : () => unawaited(
+                                            importer.importLocalFile(),
                                           ),
+                                    icon: const Icon(
+                                      Icons.upload_file_outlined,
                                     ),
+                                    label: const Text('Import file'),
                                   ),
-                                  FilledButton.tonalIcon(
-                                    onPressed: _showContentPopup,
-                                    icon: const Icon(Icons.open_in_full),
-                                    label: const Text('View full'),
+                                  OutlinedButton.icon(
+                                    onPressed: _showImportUrlDialog,
+                                    icon: const Icon(Icons.link),
+                                    label: const Text('Web link'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: _showSleepTimer,
+                                    icon: Icon(
+                                      ttsService.sleepTimerEndsAt == null
+                                          ? Icons.bedtime_outlined
+                                          : Icons.bedtime,
+                                    ),
+                                    label: Text(
+                                      ttsService.sleepTimerEndsAt == null
+                                          ? 'Sleep timer'
+                                          : 'Pause at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(ttsService.sleepTimerEndsAt!))}',
+                                    ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 12),
-                              Expanded(
-                                child: TextField(
-                                  controller: _textController,
-                                  maxLines: null,
-                                  expands: true,
-                                  textAlignVertical: TextAlignVertical.top,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.bodyLarge?.copyWith(height: 1.5),
-                                  contextMenuBuilder: (context, editableTextState) {
-                                    final selection = editableTextState
-                                        .textEditingValue
-                                        .selection;
-                                    final buttonItems = <ContextMenuButtonItem>[
-                                      ...editableTextState
-                                          .contextMenuButtonItems,
-                                      if (selection.isValid &&
-                                          !selection.isCollapsed)
-                                        ContextMenuButtonItem(
-                                          label: 'Play selection',
-                                          onPressed: () {
-                                            ContextMenuController.removeAny();
-                                            unawaited(
-                                              ttsService.playSelection(
-                                                selection,
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                    ];
-
-                                    return AdaptiveTextSelectionToolbar.buttonItems(
-                                      anchors:
-                                          editableTextState.contextMenuAnchors,
-                                      buttonItems: buttonItems,
-                                    );
-                                  },
-                                  decoration: const InputDecoration(
-                                    hintText:
-                                        'Paste text here, import a .txt, .epub, or .pdf file, or share a web link from your browser.',
-                                    border: InputBorder.none,
-                                    enabledBorder: InputBorder.none,
-                                    focusedBorder: InputBorder.none,
-                                    disabledBorder: InputBorder.none,
-                                    errorBorder: InputBorder.none,
-                                    focusedErrorBorder: InputBorder.none,
-                                    filled: false,
-                                    isCollapsed: true,
-                                    contentPadding: EdgeInsets.zero,
+                            ),
+                          if (startupError != null) ...[
+                            Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(18),
+                                child: Text(
+                                  startupError,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
                                   ),
-                                  onChanged: (value) {
-                                    unawaited(
-                                      importer.detachIfTextChanged(value),
-                                    );
-                                    unawaited(ttsService.updateText(value));
-                                  },
                                 ),
                               ),
-                            ],
+                            ),
+                          ],
+                          if (startupError == null && !servicesReady) ...[
+                            Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(18),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.6,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Text(
+                                        'Preparing voices and playback controls…',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodyMedium,
+                                      ),
+                                    ),
+                                    if (!audioHandlerController.isReady)
+                                      Text(
+                                        'Starting',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelMedium
+                                            ?.copyWith(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                          if (importer.isImporting && _isImportDialogMinimized)
+                            _ImportMiniBar(
+                              importer: importer,
+                              onOpenProgress: () {
+                                setState(() {
+                                  _isImportDialogMinimized = false;
+                                });
+                              },
+                              onStop: () => unawaited(importer.cancelImport()),
+                            ),
+                          if (!importer.isImporting &&
+                              importer.hasPendingSharedUrl)
+                            _ImportStatusCard(
+                              importer: importer,
+                              onStartImport: _showImportUrlDialog,
+                              onStartPendingImport: () =>
+                                  unawaited(importer.importPendingSharedUrl()),
+                              onClearSharedLink: () =>
+                                  unawaited(importer.clearPendingSharedUrl()),
+                            ),
+                          if (!importer.isImporting &&
+                              !importer.hasPendingSharedUrl &&
+                              (importer.importStatus != null ||
+                                  importer.errorMessage != null))
+                            Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        [
+                                          if (importer.importStatus != null)
+                                            importer.importStatus!,
+                                          if (importer.errorMessage != null)
+                                            importer.errorMessage!,
+                                        ].join('\n'),
+                                        style: importer.errorMessage == null
+                                            ? null
+                                            : TextStyle(
+                                                color: Theme.of(
+                                                  context,
+                                                ).colorScheme.error,
+                                              ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Dismiss import message',
+                                      onPressed: importer.clearImportMessage,
+                                      icon: const Icon(Icons.close),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          if (importer.activeNovel != null) ...[
+                            if (importer.isImporting &&
+                                _isImportDialogMinimized)
+                              const SizedBox(height: 16)
+                            else if (!importer.isImporting &&
+                                importer.hasPendingSharedUrl)
+                              const SizedBox(height: 16),
+                            _ActiveNovelCard(
+                              importer: importer,
+                              onOpenChapters: _showChapterSheet,
+                              onPreviousChapter: () => unawaited(
+                                _skipToPreviousUsingBestAvailableController(),
+                              ),
+                              onNextChapter: () => unawaited(
+                                _skipToNextUsingBestAvailableController(),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            height: editorHeight + (textScale - 1) * 160,
+                            child: Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            'Reading content',
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                          ),
+                                        ),
+                                        Flexible(
+                                          child: TextButton(
+                                            key: const ValueKey(
+                                              'content-full-view',
+                                            ),
+                                            onPressed: _showContentPopup,
+                                            child: const Text(
+                                              'View full',
+                                              maxLines: 2,
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Wrap(
+                                      spacing: 8,
+                                      children: [
+                                        TextButton.icon(
+                                          onPressed: _pasteText,
+                                          icon: const Icon(
+                                            Icons.content_paste,
+                                            size: 18,
+                                          ),
+                                          label: const Text('Paste text'),
+                                        ),
+                                        if (ttsService.text.isNotEmpty)
+                                          TextButton.icon(
+                                            onPressed: () => unawaited(
+                                              _replaceEditorText(''),
+                                            ),
+                                            icon: const Icon(
+                                              Icons.note_add_outlined,
+                                              size: 18,
+                                            ),
+                                            label: const Text('New text'),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _textController,
+                                        maxLines: null,
+                                        expands: true,
+                                        textAlignVertical:
+                                            TextAlignVertical.top,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyLarge
+                                            ?.copyWith(height: 1.5),
+                                        contextMenuBuilder:
+                                            (context, editableTextState) {
+                                              final selection =
+                                                  editableTextState
+                                                      .textEditingValue
+                                                      .selection;
+                                              final buttonItems =
+                                                  <ContextMenuButtonItem>[
+                                                    ...editableTextState
+                                                        .contextMenuButtonItems,
+                                                    if (selection.isValid &&
+                                                        !selection.isCollapsed)
+                                                      ContextMenuButtonItem(
+                                                        label: 'Play selection',
+                                                        onPressed: () {
+                                                          ContextMenuController.removeAny();
+                                                          unawaited(
+                                                            ttsService
+                                                                .playSelection(
+                                                                  selection,
+                                                                ),
+                                                          );
+                                                        },
+                                                      ),
+                                                  ];
+
+                                              return AdaptiveTextSelectionToolbar.buttonItems(
+                                                anchors: editableTextState
+                                                    .contextMenuAnchors,
+                                                buttonItems: buttonItems,
+                                              );
+                                            },
+                                        decoration: const InputDecoration(
+                                          hintText:
+                                              'Paste text here, import a .txt, .epub, or .pdf file, or share a web link from your browser.',
+                                          border: InputBorder.none,
+                                          enabledBorder: InputBorder.none,
+                                          focusedBorder: InputBorder.none,
+                                          disabledBorder: InputBorder.none,
+                                          errorBorder: InputBorder.none,
+                                          focusedErrorBorder: InputBorder.none,
+                                          filled: false,
+                                          isCollapsed: true,
+                                          contentPadding: EdgeInsets.zero,
+                                        ),
+                                        onChanged: (value) {
+                                          unawaited(
+                                            importer.detachIfTextChanged(value),
+                                          );
+                                          unawaited(
+                                            ttsService.updateText(value),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          if (!isKeyboardOpen) ...[
+                            const SizedBox(height: 16),
+                            _NowReadingCard(
+                              ttsService: ttsService,
+                              chapterLabel: importer.activeChapter?.title,
+                              onOpenParagraphs: _showParagraphSheet,
+                              onOpenPopup: _showReaderPopup,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    if (!isKeyboardOpen) ...[
-                      const SizedBox(height: 16),
-                      _NowReadingCard(
-                        ttsService: ttsService,
-                        chapterLabel: importer.activeChapter?.title,
-                        onOpenParagraphs: _showParagraphSheet,
-                        onOpenPopup: _showReaderPopup,
-                      ),
-                    ],
-                  ],
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
@@ -1130,12 +1213,16 @@ class _ChapterBadge extends StatelessWidget {
         color: Theme.of(context).colorScheme.primaryContainer,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Text(
-        label,
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-          color: Theme.of(context).colorScheme.onPrimaryContainer,
-          fontWeight: FontWeight.w700,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          maxLines: 1,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
@@ -1504,60 +1591,51 @@ class _ActiveNovelCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final novel = importer.activeNovel!;
-    final chapter = importer.activeChapter;
-    final actionStyle = FilledButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-      visualDensity: VisualDensity.compact,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-    final colorScheme = Theme.of(context).colorScheme;
-
+    final theme = Theme.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(novel.title, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              novel.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleLarge,
+            ),
             const SizedBox(height: 8),
             Text(
-              '${novel.chapters.length} chapters • ${Uri.tryParse(novel.sourceUrl)?.host ?? novel.sourceUrl}',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: colorScheme.onSurface),
-            ),
-            if (chapter != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Current chapter: ${chapter.title}',
-                style: Theme.of(context).textTheme.bodyLarge,
+              'Chapter ${importer.activeChapterIndex + 1} of ${novel.chapters.length} - ${novel.sourceLabel}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-            ],
+            ),
+            const SizedBox(height: 12),
+            if (importer.activeChapter != null)
+              Text(
+                importer.activeChapter!.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             const SizedBox(height: 16),
             Row(
               children: [
-                Expanded(
-                  flex: 9,
-                  child: FilledButton.tonalIcon(
-                    style: actionStyle,
-                    onPressed: importer.activeChapterIndex > 0
-                        ? onPreviousChapter
-                        : null,
-                    icon: const Icon(Icons.chevron_left),
-                    label: const Text(
-                      'Prev',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                IconButton.filledTonal(
+                  tooltip: 'Previous chapter',
+                  onPressed: importer.activeChapterIndex > 0
+                      ? onPreviousChapter
+                      : null,
+                  icon: const Icon(Icons.chevron_left),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  flex: 12,
                   child: FilledButton.tonalIcon(
-                    style: actionStyle,
                     onPressed: onOpenChapters,
-                    icon: const Icon(Icons.menu_book),
+                    icon: const Icon(Icons.menu_book_outlined),
                     label: const Text(
                       'Chapters',
                       maxLines: 1,
@@ -1566,21 +1644,13 @@ class _ActiveNovelCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  flex: 9,
-                  child: FilledButton.tonalIcon(
-                    style: actionStyle,
-                    onPressed:
-                        importer.activeChapterIndex < novel.chapters.length - 1
-                        ? onNextChapter
-                        : null,
-                    icon: const Icon(Icons.chevron_right),
-                    label: const Text(
-                      'Next',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                IconButton.filledTonal(
+                  tooltip: 'Next chapter',
+                  onPressed:
+                      importer.activeChapterIndex < novel.chapters.length - 1
+                      ? onNextChapter
+                      : null,
+                  icon: const Icon(Icons.chevron_right),
                 ),
               ],
             ),
@@ -1622,27 +1692,56 @@ class _NowReadingCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Now reading',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                FilledButton.tonalIcon(
-                  onPressed: onOpenPopup,
-                  icon: const Icon(Icons.open_in_full),
-                  label: const Text('View full'),
+                Flexible(
+                  child: TextButton(
+                    key: const ValueKey('now-reading-full-view'),
+                    onPressed: onOpenPopup,
+                    child: const Text(
+                      'View full',
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              'Paragraph ${ttsService.currentParagraphIndex + 1}',
+              ttsService.paragraphCount == 0
+                  ? 'Ready when you are'
+                  : 'Paragraph ${ttsService.currentParagraphIndex + 1} of ${ttsService.paragraphCount}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colorScheme.primary,
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (ttsService.paragraphCount > 0) ...[
+              const SizedBox(height: 10),
+              LinearProgressIndicator(
+                value: ttsService.playbackState == ReaderPlaybackState.completed
+                    ? 1
+                    : ttsService.currentParagraphIndex /
+                          ttsService.paragraphCount,
+                semanticsLabel: 'Chapter reading progress',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                ttsService.isPlaying
+                    ? 'Playing'
+                    : ttsService.isPaused
+                    ? 'Paused - your place is saved'
+                    : 'Ready to read',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            ],
             if (chapterLabel != null) ...[
               const SizedBox(height: 8),
               Text(
@@ -1671,6 +1770,7 @@ class _NowReadingCard extends StatelessWidget {
                 runSpacing: 10,
                 children: [
                   OutlinedButton.icon(
+                    key: const ValueKey('paragraph-picker'),
                     onPressed: onOpenParagraphs,
                     icon: const Icon(Icons.format_list_numbered),
                     label: const Text('Play from paragraph'),
