@@ -1,205 +1,107 @@
-# DhebeVoice
-
-**Long-form reading, aloud.**
-
-[Google Play closed testing](https://play.google.com/store/apps/details?id=com.dhebe.dhebevoice) · [Features](#highlights) · [Source code](lib)
-
 <p align="center">
-  <img src="assets/store/screenshots/screen-1-home.png" alt="DhebeVoice reading screen" width="30%">
-  <img src="assets/store/screenshots/screen-3-library.jpg" alt="DhebeVoice saved book library" width="30%">
-  <img src="assets/store/screenshots/screen-4-settings.png" alt="DhebeVoice settings screen" width="30%">
+  <img src="assets/store/app-icon-512.png" alt="DhebeVoice app logo" width="112" height="112">
 </p>
 
-DhebeVoice is a Flutter-based Android text-to-speech reader for long-form reading. It helps users listen to pasted text, imported files, and readable web pages with chapter-aware playback, paragraph controls, and background media controls.
+<h1 align="center">DhebeVoice</h1>
+<p align="center"><strong>Long-form reading, aloud.</strong><br>Turn text, books, and readable web pages into your listening queue.</p>
 
-## Project Direction
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Android-3DDC84" alt="Platform: Android">
+  <img src="https://img.shields.io/badge/Built_with-Flutter-02569B" alt="Built with Flutter">
+  <img src="https://img.shields.io/badge/Neural_speech-On_device-0078D4" alt="Optional on-device neural speech">
+  <img src="https://img.shields.io/badge/Availability-Closed_testing-64748B" alt="Availability: Google Play closed testing">
+</p>
 
-This repository sits at the intersection of **accessible application development and speech AI** in my portfolio. It complements my model-training work in [tts_humanize](https://github.com/DattaDhebe/tts_humanize) and [personal-voice-tts](https://github.com/DattaDhebe/personal-voice-tts) by focusing on the user-facing reading experience.
+<p align="center">
+  <a href="https://play.google.com/store/apps/details?id=com.dhebe.dhebevoice">Google Play</a> |
+  <a href="#features">Features</a> |
+  <a href="docs/READER_GUIDE.md">Reader guide</a> |
+  <a href="docs/DEVELOPMENT.md">Development</a> |
+  <a href="CHANGELOG.md">Changelog</a> |
+  <a href="https://github.com/DattaDhebe/dhebevoice-app/issues/new/choose">Report an issue</a>
+</p>
 
-## Highlights
+DhebeVoice is an Android text-to-speech reader built with Flutter and Kotlin. Listen to pasted text, TXT, EPUB, PDF, and supported web pages, keep a local Book List, and continue through chapters with paragraph-aware controls. Use your installed Android voices or download the optional Supertonic 3 pack for on-device neural narration. DhebeVoice does not require a paid TTS API key.
 
-- Read aloud pasted text with Android TTS voices
-- Import `.txt`, `.epub`, and `.pdf` files
-- Import readable web pages and shared web links
-- Save imported books and reopen them from the in-app library
-- Play from the current paragraph or jump to a specific paragraph
-- Move chapter by chapter with autoplay support
-- Continue playback with Android notification and media controls
-- Choose voice, speech rate, pitch, volume, and theme
+> **Availability:** The app is in Google Play closed testing; the Play link may require tester access. This repository can contain changes newer than the installed Play build. See the [changelog](CHANGELOG.md) for the distinction.
 
-## Import Sources
+## Preview
 
-DhebeVoice is designed for content the user owns, is licensed to access, or that is in the public domain.
+<table>
+  <tr>
+    <th>Read and listen</th>
+    <th>Keep your books</th>
+    <th>Personalize playback</th>
+  </tr>
+  <tr>
+    <td><img src="assets/store/screenshots/screen-1-home.png" alt="DhebeVoice reader with Now reading and playback controls" width="240"></td>
+    <td><img src="assets/store/screenshots/screen-3-library.jpg" alt="Book List with an example imported book" width="240"></td>
+    <td><img src="assets/store/screenshots/screen-4-settings.png" alt="DhebeVoice voice and playback settings" width="240"></td>
+  </tr>
+</table>
 
-Supported reading flows:
+Screenshots show an earlier app build; current controls and voice selection have evolved.
 
-- Paste text directly into the editor
-- Import local `.txt`, `.epub`, and `.pdf` files
-- Share a readable web link into the app
-- Start web import manually from inside the app
+## Features
 
-Import behavior and limits:
+| Area | What you can do |
+| --- | --- |
+| Import | Paste text, open TXT/EPUB/text-based PDF files, or share a readable web link from your browser. Review shared links before starting an import. |
+| Library | Keep imported books locally, search books and chapters, reopen saved reading positions, and delete books with confirmation. A removable sample book helps first-time users. |
+| Reader | Open full reading views, highlight the current passage, play from selected text or a paragraph, and jump to nearby paragraphs or chapters. |
+| Playback | Use persistent Play/Pause/Stop controls, chapter continuation, notification and lock-screen media controls, Bluetooth controls, and a sleep timer. |
+| Voice choice | Browse searchable avatar cards, full language/region names, and engine-provided quality and offline/online information. |
+| Neural narration | Download Supertonic 3, generate speech on-device, see preparation progress, and choose background preloading or optional whole-chapter preparation. |
+| Appearance | Choose light, dark, or follow-device themes. Layout tests cover small screens, large text, and the keyboard. |
 
-- Shared links wait for Start. Closing the progress popup keeps downloading; Stop cancels the web request and saves completed chapters.
-- A later download failure keeps completed chapters and offers a retry. Re-imports merge overlapping books without replacing saved chapters or interrupting the current reader.
-- Web imports are limited to 200 chapters, 2 MB per page, and about 12.6 million text characters per import. Requests are sequential and spaced apart. Access restrictions, sign-in pages, and browser verification are not bypassed.
-- Local files are limited to 50 MB. TXT supports UTF-8 and BOM-marked UTF-16. PDF imports extract embedded text, not OCR, with a 1,500-page limit.
-- EPUB imports check expanded size (100 MB total, 20 MB per entry, 5,000 entries) before parsing. Both EPUB and PDF have a text limit of about 12.6 million characters.
-- Web import relies on readable HTML and chapter links. JavaScript-only sites and some site layouts may not be supported. File parsing runs on a worker; stopping a local import discards its result after parsing finishes.
+## Speech Engines
 
-## Main Features
+| | Installed Android TTS | Supertonic 3 |
+| --- | --- | --- |
+| Setup | Default; uses your phone's installed engine and voices | Optional model download, about 402 MB; allow at least 850 MB free space |
+| Voice choice | Depends on the installed provider, language packs, and device | Ten narrators across 31 supported languages, including English and Hindi |
+| Processing | Offline or online, as reported by the provider | On-device inference through ONNX Runtime |
+| Internet | Required for online voices; selection asks for consent | Required to download the model, not to synthesize after installation |
+| Cost and terms | No paid cloud API integration in DhebeVoice; provider terms and data charges still apply | No paid API; OpenRAIL-M model restrictions and bundled license notices apply |
 
-### Reader
+Android does not provide a standard voice-gender field. Cards show Female, Male, or Child when the provider supplies a recognizable label, otherwise **Gender not provided**. Select a voice and use the label icon to save your own local type label without changing the sound or interrupting playback. Friendly display names never replace the engine's actual voice ID.
 
-- Large editable reading area
-- `View full` popup for reading content
-- Text selection playback
-- Paragraph-aware progress tracking
-- Search paragraphs by text or number and play from the matching result
-- Confirm before replacing open text from the clipboard
+Voice and language changes take effect at the next speech segment. Changing language changes pronunciation, **not** the written text. Neural generation can still be slower than playback on some phones; buffering and changes in delivery between segments remain possible. See [speech behavior and limits](docs/SPEECH_AND_IMPORTS.md).
 
-### Library
+## Start Listening
 
-- Book List for imported books and web content
-- Chapter browser with current chapter tracking
-- Sample starter book for first-time users
-- Search books and chapters; pickers open around the current reading position
-- Confirm book deletion without leaving the Book List
+1. Paste text, import a supported file, or share a web link into DhebeVoice.
+2. For a shared link, review it and press **Start import**. Closing the progress popup does not stop downloading; **Stop import** does.
+3. Open a book or chapter, choose an installed voice, and press **Play**. Use paragraph selection to begin elsewhere.
+4. Optionally download Supertonic 3 in Settings and select it under Speech engine.
 
-### Playback
+See the [reader guide](docs/READER_GUIDE.md) for voice labeling, import recovery, background playback, and common limitations.
 
-- Play, pause, stop, previous, and next controls
-- Background playback support
-- Lock-screen and notification media controls
-- Paragraph and chapter handoff support
-- Transient audio interruptions pause spoken content and resume only if the user has not paused or stopped it. Permanent focus loss requires manual Play, following [Android audio focus guidance](https://developer.android.com/media/optimize/audio-focus).
-- Disconnecting Bluetooth or wired headphones pauses playback; reconnecting alone never starts speech through a different output.
-- Headset, notification, and in-app controls share transport state. Newer Play/Pause/Stop commands cancel stale work; chapter transitions retain the media session, and skipping while paused stays paused.
-- A 15, 30, 45, or 60-minute sleep timer pauses without resetting your place. It continues across chapters and manual pauses; Stop cancels it. The timer lasts for the current app session.
-- Playback controls stay visible in both full-reading views
-- The player distinguishes preparing, playing, paused, and stopped states. Longer startup, segment, or voice-change waits open a preparation popup after 700 ms; Hide keeps preparing and Stop cancels. The popup closes automatically when speech starts and never opens while the app is in the background.
-- Neural preparation reports real text-encoding, refinement, and audio-writing stages, not an estimated completion time. Model loading and Android TTS waits use an indeterminate bar when measurable progress is unavailable.
-- Supertonic defaults to starting playback when the first segment is ready and generating future audio in the background. A rolling window covers up to eight upcoming segments and 1,200 text characters, including runs of short paragraphs. The first segment never waits for that window to finish; matching future audio is retained across handoffs. Quality stays at five steps and speech rate is not changed. Generation slower than playback can still cause buffering on some phones.
-- Whole-chapter preparation remains an optional Settings switch for users who prefer a longer initial wait over conversion gaps. Its popup reports completed speech segments and refinement stages. No whole chapter is loaded into RAM.
-- Voice and language selections apply automatically at the next speech segment without pausing the reader. A language change keeps the same Supertonic narrator; it changes pronunciation, not the written text. A paused reader stays paused.
-- Supertonic also prepares the next audio decoder ahead of playback and trims only near-silent segment edges, keeping short consonant margins and internal pauses. Separate model requests can still vary in prosody; this is not a guarantee of cloud-level continuous narration.
-- Neural synthesis uses repeatable, narrator/language-specific Gaussian noise. Each latent channel keeps the same noise prefix across different paragraph lengths, removing per-request random rerolls without changing voice styles, speed, or refinement steps. Text-dependent delivery can still vary; this is not voice cloning or a promise of identical prosody.
-- Neural narration uses Quality (5 synthesis steps). The experimental 3-step Faster mode was removed because of reported distorted speech; saved 3-step selections migrate to Quality without changing speech rate. Neural Speech rate shows an actual multiplier, independently of generation quality. Paragraph handoffs do not wait for reading-position disk writes.
-- Chapter preparation is limited to 50,000 text characters, 400 speech segments, and 256 MB of temporary audio, with 64 MB free storage reserved. Stop deletes prepared audio. Pause during preparation cancels the job; Resume prepares it again. Voice, language, or rate changes prepare the remaining chapter at the next segment boundary. Selecting a different chapter or section prepares only that new selection. Preparation restarts after process death; this is not a persistent audiobook export.
-- Android voice settings include an online-only shortcut showing voices actually exposed by the installed engine. Online selection requires consent before text can be sent to the provider; no paid API key is used by DhebeVoice.
-- Choose voice uses distinct Supertonic nicknames (Asha, Mira, Clara, Iris, Nora, Arun, Theo, Rowan, Felix, Leo). Technical Android voice IDs get stable, gender-neutral friendly names, with duplicate names resolved within each language. Existing human-readable provider names are retained. Hold a card to see the original engine ID; saved selections and synthesis still use that ID, never the nickname. These are app display names, not new models or provider endorsements.
+## Privacy and Content
 
-### Setup
+Books and reading positions are stored locally. Optional neural synthesis runs on the device. Web imports contact the source website, model downloads contact the model host, and online Android voices may send reading text to their provider after consent. Device-engine behavior and provider terms still apply.
 
-- First-run guide
-- Voice cards show Female, Male, or Child when the provider reports it. Android voices without gender metadata show "Gender not provided" instead of a guess. Select a voice and use the label icon to save your own local voice-type label; "Use provider label" clears it. Personal labels are scoped to the engine, original voice ID, and language and do not change audio or interrupt playback.
-- Readable language/region names and a searchable avatar-card voice picker with explicit selection confirmation. Only installed voices are offered; online voices still require consent. Icons reflect known voice metadata, not invented voice identities.
-- Light, dark, and follow-device theme options
-- Consistent responsive layouts with narrow-screen and large-text widget tests
+Import only content you own, are licensed to access, or that is in the public domain. The app does not host books, grant copyright permissions, bypass paywalls, or bypass website access restrictions. Text-based PDF extraction is supported; scanned-image OCR is not.
 
-## Tech Stack
+## For Developers
 
-### Optional Neural Narration (Android)
-
-In Settings, download the optional **Supertonic 3** pack (about 402 MB) and select it under Speech engine. Ten voices support 31 languages including English and Hindi. Inference runs on the device, off the UI thread; no TTS API key, subscription, or metered cloud API is used. Android TTS remains the default and switching back does not delete your books.
-
-- Downloads require confirmation and SHA-256 verification. Cancel/retry and deletion are available. Allow at least 850 MB free storage; performance and memory use depend on the phone.
-- Pause/resume retains the current generated segment while the app process lives. Saved book position is at segment boundaries, not individual neural speech words. Pitch is fixed; rate changes affect subsequent segments. Slower devices may have gaps between segments.
-- The [official Supertonic archive](https://huggingface.co/supertone-oss-archive/supertonic-3) uses OpenRAIL-M model terms and MIT inference code. The upstream project is archived. Full notices are included in Settings > Open-source and voice model licenses.
-- Android voices can be filtered by Offline/Online. Online voices are supplied by the installed TTS engine and may transmit reading text to its provider. DhebeVoice adds no paid cloud TTS API; provider terms and connectivity/data charges still apply. Engine-reported quality is not an independent naturalness assessment.
-- Kokoro's Apache-2.0 model was evaluated as an alternative, but is **not integrated**: the mobile English pronunciation path needs further unknown-word and license validation. No unofficial cloud endpoints or public demo services are used.
-
-Native inference smoke test (requires the verified Supertonic pack files in a local directory):
-
-```powershell
-$env:DHEBEVOICE_TEST_MODELS='F:\path\to\supertonic-3'
-# Optional on Windows: use a newer JDK when Android Studio's bundled C++ runtime is too old.
-# $env:DHEBEVOICE_TEST_JAVA='C:\path\to\newer-jdk\bin\java.exe'
-cd android
-.\gradlew.bat :app:testDebugUnitTest
-```
-
-The smoke test is skipped when this environment variable is absent. Device testing of neural narration, Bluetooth controls, and long background sessions is still required before a Play release.
-
-For a controlled CPU comparison, build `:app:assembleDebugAndroidTest` with `-PdhebeVoiceTestBuild=true`, install its test APK alongside DhebeVoice Test, and run `adb shell am instrument -w -e threads 2,4,2,4 com.dhebe.dhebevoice.test.test/com.dhebe.dhebevoice.SpeechRuntimeBenchmark`. Add `-e provider xnnpack` before the runner name to measure the optimized mobile backend instead of the default CPU backend. Pause the reader first: instrumentation restarts only the Test process. The benchmark requires the downloaded model pack, uses fixed sample text, five steps, M2 and normal speed, excludes model loading/warm-up from generation timings, and writes `cache/speech-runtime-benchmark-cpu.json` (or `-xnnpack.json`) inside the Test app. It never plays audio or reads the user's book. The runner refuses to run against the production package and is not included in the reader APK.
-
-### Dependencies
-
-- Flutter
-- Provider
-- `flutter_tts`
-- `audio_service`
-- `audio_session`
-- `receive_sharing_intent`
-
-## Project Status
-
-This repository contains the active source for the DhebeVoice Android app package:
-
-- App name: `DhebeVoice`
-- Android package: `com.dhebe.dhebevoice`
-
-The Android app is in Google Play closed testing. The repository includes iOS targets, but the current validation and release workflow focus on Android. Some capabilities are still being developed.
-
-## Local Development
-
-Install Flutter, then run:
+Validated locally with Flutter 3.41.9 / Dart 3.11.5. Android is the actively tested target; other generated platform directories are not a promise of feature parity.
 
 ```bash
+git clone https://github.com/DattaDhebe/dhebevoice-app.git
+cd dhebevoice-app
 flutter pub get
-flutter run
-```
-
-For platform-specific setup, see the [Flutter documentation](https://docs.flutter.dev/get-started/install).
-
-To test alongside the Play-installed app without touching its books or settings:
-
-```powershell
-cd android
-.\gradlew.bat :app:assembleDebug -PdhebeVoiceTestBuild=true
-```
-
-This opt-in debug build uses package `com.dhebe.dhebevoice.test` and label `DhebeVoice Test`. Release builds and normal debug builds keep the original package. Debug-only `DhebeVoiceTTS` log messages record generation and handoff timings, never reading text.
-
-Run checks:
-
-```bash
 flutter analyze
 flutter test
+flutter run -d <android-device-id>
 ```
 
-Build a release bundle:
+Use the separate **DhebeVoice Test** build to avoid modifying a Play-installed app's books and settings. Read [development and release setup](docs/DEVELOPMENT.md), the [architecture map](docs/ARCHITECTURE.md), and [contribution guidance](CONTRIBUTING.md) before changing playback or imports. Release signing credentials and model downloads must stay outside Git.
 
-```bash
-flutter build appbundle --release
-```
+## Related Work
 
-## Repository Metadata Suggestions
+DhebeVoice focuses on the application and listening experience. The author's separate speech-model projects are [tts_humanize](https://github.com/DattaDhebe/tts_humanize) and [personal-voice-tts](https://github.com/DattaDhebe/personal-voice-tts). They are not paid cloud services or bundled replacements for the engines listed above.
 
-These are good GitHub "About" values for this repo:
+## Licensing
 
-- Description: `Android text-to-speech reader built with Flutter for text, EPUB, PDF, and readable web pages.`
-- Website: `https://play.google.com/store/apps/details?id=com.dhebe.dhebevoice`
-- Topics:
-  - `flutter`
-  - `android`
-  - `text-to-speech`
-  - `tts`
-  - `epub-reader`
-  - `pdf-reader`
-  - `read-aloud`
-  - `accessibility`
-  - `web-reader`
-
-## Notes
-
-- Web import should only be used for content the user is authorized to access.
-- Android TTS behavior can vary by device ROM, voice engine, and battery/background restrictions.
-## Related projects
-
-- [Personal Voice TTS](https://github.com/DattaDhebe/personal-voice-tts) — training and inference workflow for personalized VITS models
-- [TTS Humanize](https://github.com/DattaDhebe/tts_humanize) — GPU-accelerated Coqui TTS experimentation
-
-## License
-
-See the repository for the current license and project configuration.
+This repository currently has no project-wide license file; do not assume that its source is MIT- or Apache-licensed. Third-party code and model terms remain separate. Bundled notices are in [assets/licenses](assets/licenses) and **Settings > Open-source & voice model licenses**. Supertonic's model uses OpenRAIL-M terms; its upstream repository is archived. Dependency and model licensing must be reviewed before redistribution.
