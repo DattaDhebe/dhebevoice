@@ -35,7 +35,7 @@ Ten narrators have friendly names. Their supported languages include English and
 
 Default playback begins when the first segment is ready and prepares upcoming segments in the background. A preparation popup appears for longer waits and shows measurable stages when available. **Hide** keeps preparing; **Stop** cancels. Slower devices can still buffer between segments.
 
-**Prepare chapter before playing** is optional. It trades a longer initial wait for having the current chapter's audio ready before playback. Prepared audio is temporary, not a saved audiobook export. See [neural speech limits](SPEECH_AND_IMPORTS.md#neural-preparation).
+**Wait for the whole chapter (optional)** is the Settings switch for preparing chapter audio before playback. It trades a longer initial wait for having the current chapter's audio ready before playback. Prepared audio is temporary, not a saved audiobook export. See [neural speech limits](SPEECH_AND_IMPORTS.md#neural-preparation).
 
 ## Playback and Reading Position
 
