@@ -18,7 +18,7 @@
   <a href="docs/READER_GUIDE.md">Reader guide</a> |
   <a href="docs/DEVELOPMENT.md">Development</a> |
   <a href="CHANGELOG.md">Changelog</a> |
-  <a href="https://github.com/DattaDhebe/dhebevoice-app/issues/new/choose">Report an issue</a>
+  <a href="https://github.com/DattaDhebe/dhebevoice/issues/new/choose">Report an issue</a>
 </p>
 
 DhebeVoice is an Android text-to-speech reader built with Flutter and Kotlin. Listen to pasted text, TXT, EPUB, PDF, and supported web pages, keep a local Book List, and continue through chapters with paragraph-aware controls. Use your installed Android voices or download the optional Supertonic 3 pack for on-device neural narration. DhebeVoice does not require a paid TTS API key.
@@ -88,8 +88,8 @@ Import only content you own, are licensed to access, or that is in the public do
 Validated locally with Flutter 3.41.9 / Dart 3.11.5. Android is the actively tested target; other generated platform directories are not a promise of feature parity.
 
 ```bash
-git clone https://github.com/DattaDhebe/dhebevoice-app.git
-cd dhebevoice-app
+git clone https://github.com/DattaDhebe/dhebevoice.git
+cd dhebevoice
 flutter pub get
 flutter analyze
 flutter test

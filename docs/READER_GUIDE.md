@@ -51,4 +51,4 @@ The sleep timer pauses at its deadline without resetting your place. It spans ch
 
 Check notification permissions, the installed Android TTS engine and voice download, and the phone's background/battery settings. Manufacturer restrictions can affect background operation. Neural generation speed depends on the device and available resources; a visible preparation state is not necessarily a crash.
 
-If the problem persists, [report it](https://github.com/DattaDhebe/dhebevoice-app/issues/new/choose) with your app version, Android version, engine and voice, audio output, and whether the screen was locked. Do not attach private books, credentials, or unredacted device logs.
+If the problem persists, [report it](https://github.com/DattaDhebe/dhebevoice/issues/new/choose) with your app version, Android version, engine and voice, audio output, and whether the screen was locked. Do not attach private books, credentials, or unredacted device logs.

@@ -8,6 +8,7 @@ This file distinguishes current source changes from previously uploaded app bund
 - Add reversible personal Female/Male/Child labels, stored separately for each engine, voice ID, and language without interrupting playback.
 - Add persistence, playback, save-failure, and small-screen regression coverage for voice labeling.
 - Refresh the repository overview, screenshots, feature documentation, development guidance, and issue templates.
+- Align the GitHub repository name with the DhebeVoice brand and update repository links; the Android app identity is unchanged.
 
 ## 1.2.3 (11)
 
@@ -22,4 +23,4 @@ Prepared and submitted to the existing Google Play Closed testing - Alpha track.
 
 Generation speed still depends on the device. Buffering and text-dependent variation between segments may remain. [Uploaded release-note text](assets/store/release-notes/1.2.3-en-US.txt).
 
-Earlier changes are recorded in [Git history](https://github.com/DattaDhebe/dhebevoice-app/commits/main/).
+Earlier changes are recorded in [Git history](https://github.com/DattaDhebe/dhebevoice/commits/main/).

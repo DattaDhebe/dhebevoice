@@ -4,7 +4,7 @@ Thank you for helping improve DhebeVoice. Android is the actively tested target.
 
 ## Report an Issue
 
-Use the [issue templates](https://github.com/DattaDhebe/dhebevoice-app/issues/new/choose) and include reproducible steps, app version/build, Android version, device, speech engine and original voice ID, audio output, and whether the app was backgrounded or locked. For imports, specify the file type or a safe public URL and the exact error.
+Use the [issue templates](https://github.com/DattaDhebe/dhebevoice/issues/new/choose) and include reproducible steps, app version/build, Android version, device, speech engine and original voice ID, audio output, and whether the app was backgrounded or locked. For imports, specify the file type or a safe public URL and the exact error.
 
 Use the removable sample book or text you may share. Do not attach private books, copyrighted chapters without permission, keystores, service-account JSON, passwords, or unredacted logs. Report security-sensitive details privately to the maintainer using an available private contact route rather than opening a public issue with secrets.
 
