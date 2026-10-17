@@ -1,5 +1,15 @@
 # DhebeVoice
 
+**Long-form reading, aloud.**
+
+[Google Play closed testing](https://play.google.com/store/apps/details?id=com.dhebe.dhebevoice) · [Features](#highlights) · [Source code](lib)
+
+<p align="center">
+  <img src="assets/store/screenshots/screen-1-home.png" alt="DhebeVoice reading screen" width="30%">
+  <img src="assets/store/screenshots/screen-3-library.jpg" alt="DhebeVoice saved book library" width="30%">
+  <img src="assets/store/screenshots/screen-4-settings.png" alt="DhebeVoice settings screen" width="30%">
+</p>
+
 DhebeVoice is a Flutter-based Android text-to-speech reader for long-form reading. It helps users listen to pasted text, imported files, and readable web pages with chapter-aware playback, paragraph controls, and background media controls.
 
 ## Project Direction
