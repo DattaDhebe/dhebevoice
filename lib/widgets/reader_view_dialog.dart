@@ -16,12 +16,14 @@ class ReaderViewDialog extends StatelessWidget {
     required this.onPlay,
     required this.onPause,
     required this.onStop,
+    this.onSaveBookmark,
   });
 
   final bool fullContent;
   final VoidCallback onPlay;
   final VoidCallback onPause;
   final VoidCallback onStop;
+  final VoidCallback? onSaveBookmark;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +65,12 @@ class ReaderViewDialog extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (onSaveBookmark != null)
+                        IconButton(
+                          tooltip: 'Save bookmark',
+                          onPressed: onSaveBookmark,
+                          icon: const Icon(Icons.bookmark_add_outlined),
+                        ),
                       IconButton(
                         tooltip: 'Close',
                         onPressed: () => Navigator.pop(context),

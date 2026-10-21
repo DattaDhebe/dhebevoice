@@ -6,12 +6,16 @@ import 'package:provider/provider.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../models/novel_book.dart';
+import '../models/chapter_number.dart';
+import '../models/reading_bookmark.dart';
 import '../services/audio_handler_controller.dart';
 import '../services/novel_import_controller.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../widgets/import_web_link_dialog.dart';
 import '../widgets/home_reading_content.dart';
+import '../widgets/book_library_sheet.dart';
+import '../widgets/bookmark_sheet.dart';
 import '../widgets/player_controls.dart';
 import '../widgets/playback_status.dart';
 import '../widgets/reader_consumer.dart';
@@ -19,7 +23,14 @@ import '../widgets/reader_list_sheet.dart';
 import '../widgets/reader_view_dialog.dart';
 import 'settings_screen.dart';
 
-enum _ReaderAction { importFile, sleepTimer, settings, guide }
+enum _ReaderAction {
+  importFile,
+  sleepTimer,
+  settings,
+  guide,
+  saveBookmark,
+  bookmarks,
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -233,47 +244,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       showDragHandle: true,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (context) => Consumer<NovelImportController>(
-        builder: (context, importer, _) => ReaderListSheet<NovelBook>(
-          title: 'Book List',
-          items: importer.library,
-          selectedIndex: importer.library.indexWhere(
-            (book) => book.id == importer.activeNovel?.id,
-          ),
-          itemExtent: 112,
-          searchHint: 'Search books',
-          emptyMessage:
-              'Your imported books and web pages will appear here. Use Import file or Web link to add one.',
-          searchText: (book, _) => '${book.title} ${book.sourceLabel}',
-          itemBuilder: (context, book, _) => ListTile(
-            selected: book.id == importer.activeNovel?.id,
-            leading: Icon(
-              book.id == importer.activeNovel?.id
-                  ? Icons.bookmark
-                  : Icons.menu_book_outlined,
-            ),
-            title: Text(
-              book.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              '${book.chapters.length} chapters - ${book.sourceLabel}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: IconButton(
-              tooltip: 'Delete ${book.title}',
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () => unawaited(_confirmDeleteBook(book)),
-            ),
-            onTap: () {
-              Navigator.pop(context);
-              unawaited(importer.selectNovel(book.id));
-            },
-          ),
-        ),
-      ),
+      builder: (_) => BookLibrarySheet(onDelete: _confirmDeleteBook),
     );
   }
 
@@ -301,12 +272,98 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
     if (confirmed != true) return;
     try {
-      await importer.deleteNovel(book.id);
+      final warning = await importer.deleteNovel(book.id);
+      if (mounted && warning != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(warning)));
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Could not delete the book. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveBookmark() async {
+    final importer = context.read<NovelImportController>();
+    try {
+      await importer.saveCurrentBookmark();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Bookmark saved on this device.'),
+            action: SnackBarAction(label: 'View', onPressed: _showBookmarks),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not save this bookmark. Open a saved book and try again.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  void _showBookmarks() {
+    final importer = context.read<NovelImportController>();
+    final book = importer.activeNovel;
+    if (book == null) return;
+    try {
+      final bookmarks = importer.bookmarksForBook(book.id);
+      showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (sheetContext) => BookmarkSheet(
+          bookId: book.id,
+          importer: importer,
+          bookmarks: bookmarks,
+          onOpen: (mark, play) {
+            Navigator.pop(sheetContext);
+            unawaited(_openBookmark(book.id, mark, play));
+          },
+        ),
+      );
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Saved bookmarks could not be read. They have not been changed.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _openBookmark(
+    String bookId,
+    ReadingBookmark mark,
+    bool play,
+  ) async {
+    try {
+      await context.read<NovelImportController>().openBookmark(
+        bookId,
+        mark,
+        play: play,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not open this bookmark. Its book or chapter may have changed.',
+            ),
           ),
         );
       }
@@ -410,6 +467,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onPlay: () => unawaited(_playUsingBestAvailableController()),
         onPause: () => unawaited(_pauseUsingBestAvailableController()),
         onStop: () => unawaited(_stopUsingBestAvailableController()),
+        onSaveBookmark:
+            context.read<NovelImportController>().activeNovel == null
+            ? null
+            : () => unawaited(_saveBookmark()),
       ),
     );
   }
@@ -524,23 +585,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String _chapterBadgeLabel(NovelChapter chapter, int index) {
     final chapterNumber =
-        _extractChapterNumber(chapter.title) ??
-        _extractChapterNumber(chapter.url) ??
-        (index + 1);
+        ChapterNumber.parse(chapter.title, url: chapter.url) ?? (index + 1);
     return '#$chapterNumber';
-  }
-
-  int? _extractChapterNumber(String value) {
-    final match = RegExp(
-      r'(?:chapter|chap|episode|ep|part)[\s\-_:]*(\d+)',
-      caseSensitive: false,
-    ).firstMatch(value);
-    if (match != null) {
-      return int.tryParse(match.group(1) ?? '');
-    }
-
-    final fallback = RegExp(r'(\d+)').firstMatch(value);
-    return fallback == null ? null : int.tryParse(fallback.group(1) ?? '');
   }
 
   Future<void> _playUsingBestAvailableController() async {
@@ -752,6 +798,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         _showSettings();
                       case _ReaderAction.guide:
                         unawaited(_showFirstRunGuideIfNeeded(force: true));
+                      case _ReaderAction.saveBookmark:
+                        unawaited(_saveBookmark());
+                      case _ReaderAction.bookmarks:
+                        _showBookmarks();
                     }
                   },
                   itemBuilder: (_) => [
@@ -787,6 +837,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: ListTile(
                         leading: Icon(Icons.help_outline),
                         title: Text('Getting started'),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderAction.saveBookmark,
+                      enabled:
+                          importer.activeChapter != null &&
+                          ttsService.paragraphCount > 0,
+                      child: const ListTile(
+                        leading: Icon(Icons.bookmark_add_outlined),
+                        title: Text('Save bookmark'),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderAction.bookmarks,
+                      enabled: importer.activeNovel != null,
+                      child: const ListTile(
+                        leading: Icon(Icons.bookmarks_outlined),
+                        title: Text('Bookmarks & notes'),
                       ),
                     ),
                   ],
@@ -1064,6 +1132,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 onOpenParagraphs: _showParagraphSheet,
                                 onOpenPopup: _showReaderPopup,
                                 onVoiceSettings: _showSettings,
+                                onSaveBookmark: importer.activeNovel == null
+                                    ? null
+                                    : () => unawaited(_saveBookmark()),
+                                onBookmarks: importer.activeNovel == null
+                                    ? null
+                                    : _showBookmarks,
                               ),
                             ],
                           ],
@@ -1671,6 +1745,8 @@ class _NowReadingCard extends StatelessWidget {
     required this.onOpenParagraphs,
     required this.onOpenPopup,
     required this.onVoiceSettings,
+    this.onSaveBookmark,
+    this.onBookmarks,
   });
 
   final TtsService ttsService;
@@ -1678,6 +1754,8 @@ class _NowReadingCard extends StatelessWidget {
   final VoidCallback onOpenParagraphs;
   final VoidCallback onOpenPopup;
   final VoidCallback onVoiceSettings;
+  final VoidCallback? onSaveBookmark;
+  final VoidCallback? onBookmarks;
 
   @override
   Widget build(BuildContext context) {
@@ -1814,6 +1892,24 @@ class _NowReadingCard extends StatelessWidget {
                   ),
                 ],
               ),
+              if (onSaveBookmark != null) ...[
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    TextButton.icon(
+                      onPressed: onSaveBookmark,
+                      icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                      label: const Text('Save bookmark'),
+                    ),
+                    TextButton.icon(
+                      onPressed: onBookmarks,
+                      icon: const Icon(Icons.bookmarks_outlined, size: 18),
+                      label: const Text('Bookmarks'),
+                    ),
+                  ],
+                ),
+              ],
               if (ttsService.selectedVoice != null) ...[
                 const Divider(height: 20),
                 Tooltip(

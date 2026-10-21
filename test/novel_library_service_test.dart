@@ -31,6 +31,20 @@ void main() {
   });
 
   test(
+    'an existing empty file is corruption, not a new empty library',
+    () async {
+      final file = File('${directory.path}/novel_library.json');
+      for (final content in ['', '  \n']) {
+        await file.writeAsString(content);
+        await expectLater(library.loadLibrary(), throwsFormatException);
+        expect(await file.readAsString(), content);
+      }
+      await file.writeAsString('[]');
+      expect(await library.loadLibrary(), isEmpty);
+    },
+  );
+
+  test(
     'invalid JSON structure is not silently treated as an empty library',
     () async {
       final file = File('${directory.path}/novel_library.json');

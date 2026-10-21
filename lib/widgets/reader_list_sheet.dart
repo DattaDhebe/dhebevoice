@@ -14,6 +14,7 @@ class ReaderListSheet<T> extends StatefulWidget {
     this.itemExtent = 104,
     this.emptyMessage = 'Nothing here yet.',
     this.searchHint = 'Search',
+    this.headerActions,
   });
 
   final String title;
@@ -24,6 +25,7 @@ class ReaderListSheet<T> extends StatefulWidget {
   final double itemExtent;
   final String emptyMessage;
   final String searchHint;
+  final Widget? headerActions;
 
   @override
   State<ReaderListSheet<T>> createState() => _ReaderListSheetState<T>();
@@ -132,6 +134,7 @@ class _ReaderListSheetState<T> extends State<ReaderListSheet<T>> {
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
+                    if (widget.headerActions != null) widget.headerActions!,
                     IconButton(
                       tooltip: 'Close',
                       onPressed: () => Navigator.pop(context),

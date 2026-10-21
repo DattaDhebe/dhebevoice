@@ -154,6 +154,11 @@ class TtsService extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   int get currentCharIndex => _currentCharIndex;
   int get currentParagraphIndex => _currentParagraphIndex;
+  int get currentParagraphOffset => paragraphCount == 0
+      ? 0
+      : _readerText.offsetForParagraph(
+          _currentParagraphIndex.clamp(0, paragraphCount - 1),
+        );
   List<String> get paragraphs => _readerText.paragraphs;
   int get paragraphCount => paragraphs.length;
 

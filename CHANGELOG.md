@@ -2,6 +2,20 @@
 
 This file distinguishes current source changes from previously uploaded app bundles. A Git commit is not a Google Play release or approval.
 
+## 1.3.0 (13)
+
+Prepared on October 21, 2026, for the existing Google Play Closed testing -
+Alpha track. This bundle has not yet been submitted or approved.
+
+- Add offline paragraph bookmarks with editable, searchable notes and jump/play actions; store small metadata separately from full books.
+- Add remembered Book List sorting by date, title, or chapter count.
+- Fix Roman-numeral chapter badges and prevent local file hashes or unrelated URL digits from being mistaken for chapter numbers.
+- Protect existing empty library files from accidental sample-book replacement.
+- Reduce repeated chapter parsing and library scans during import merges; cache sorted library views.
+- Handle missing temporary audio directories safely during native chapter preparation.
+- Add persistence, corruption, playback-preservation, Unicode, and responsive UI regressions. No paid API or cloud service was added.
+- See the [product and reliability review](docs/PRODUCT_REVIEW_2026-10-21.md) for market sources, tradeoffs, and validation limits.
+
 ## 1.2.4 (12)
 
 Submitted on October 17, 2026, to the existing Google Play Closed testing -

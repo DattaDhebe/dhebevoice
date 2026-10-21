@@ -58,6 +58,7 @@ Real Android captures of the 1.2.4 reading experience, taken on October 17, 2026
 | --- | --- |
 | Import | Paste text, open TXT/EPUB/text-based PDF files, or share a readable web link from your browser. Review shared links before starting an import. |
 | Library | Keep imported books locally, search books and chapters, reopen saved reading positions, and delete books with confirmation. A removable sample book helps first-time users. |
+| Saved reading tools (1.3.0) | Save paragraph bookmarks with editable/searchable notes and jump/play actions. Sort Book List by date, title, or chapter count; preferences stay on-device. |
 | Reader | Open full reading views, highlight the current passage, play from selected text or a paragraph, and jump to nearby paragraphs or chapters. |
 | Playback | Use persistent Play/Pause/Stop controls, chapter continuation, notification and lock-screen media controls, Bluetooth controls, and a sleep timer. |
 | Voice choice | Browse searchable avatar cards, full language/region names, and engine-provided quality and offline/online information. |

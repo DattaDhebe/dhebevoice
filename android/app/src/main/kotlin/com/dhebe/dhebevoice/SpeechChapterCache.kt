@@ -41,20 +41,24 @@ internal class SpeechChapterCache(
                         if (next.cancelled) throw CancellationException()
                         next.running = true
                     }
-                    output = createFile()
-                    check(output!!.parentFile.usableSpace >= reserveBytes) {
+                    val file = createFile()
+                    output = file
+                    val parent = checkNotNull(file.parentFile) {
+                        "Temporary audio storage is unavailable. Please try again."
+                    }
+                    check(parent.usableSpace >= reserveBytes) {
                         "Not enough storage to prepare this chapter. Free space or turn off chapter preparation."
                     }
-                    render(key, output!!, { next.cancelled }) { stage ->
+                    render(key, file, { next.cancelled }) { stage ->
                         if (!next.cancelled) report(index, keys.size, stage)
                     }
-                    bytes += output!!.length()
-                    check(bytes <= maxBytes && output!!.parentFile.usableSpace >= reserveBytes) {
+                    bytes += file.length()
+                    check(bytes <= maxBytes && parent.usableSpace >= reserveBytes) {
                         "Chapter audio exceeds the temporary storage limit. Choose a shorter section or turn off chapter preparation."
                     }
                     synchronized(this) {
                         if (next.cancelled) throw CancellationException()
-                        next.files.add(key to output!!)
+                        next.files.add(key to file)
                         output = null
                         next.running = false
                     }

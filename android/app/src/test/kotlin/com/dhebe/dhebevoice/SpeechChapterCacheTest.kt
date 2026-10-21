@@ -106,6 +106,22 @@ class SpeechChapterCacheTest {
         assertTrue(executor.tasks.isEmpty())
     }
 
+    @Test fun missingTemporaryDirectoryReportsAnErrorBeforeRendering() {
+        val executor = ManualExecutor()
+        val cache = SpeechChapterCache(executor, { File("chapter-without-parent.wav") },
+            { _, _, _, _ -> error("Invalid storage must not start inference") }, {})
+        val ready = cache.prepare(listOf(first)) { _, _, _ -> }
+        executor.runAll()
+        assertTrue(ready.isCompletedExceptionally)
+        try { ready.join(); fail("Expected a storage error") }
+        catch (error: java.util.concurrent.CompletionException) {
+            assertTrue(error.cause is IllegalStateException)
+            assertTrue(error.cause!!.message!!.contains("Temporary audio storage"))
+        }
+        assertNull(cache.take(first))
+        cache.clear()
+    }
+
     @Test fun stopCancelsActiveChapterInferenceAndDeletesLateOutput() {
         val executor = Executors.newSingleThreadExecutor()
         val started = CountDownLatch(1)

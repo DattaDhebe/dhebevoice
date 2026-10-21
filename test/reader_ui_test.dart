@@ -24,6 +24,7 @@ import 'package:text_reader_app/services/web_novel_import_service.dart';
 import 'package:text_reader_app/widgets/reader_consumer.dart';
 import 'package:text_reader_app/widgets/reader_list_sheet.dart';
 import 'package:text_reader_app/widgets/reader_view_dialog.dart';
+import 'package:text_reader_app/widgets/bookmark_sheet.dart';
 
 class _MemoryLibrary extends NovelLibraryService {
   List<NovelBook> books = [
@@ -466,6 +467,116 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  testWidgets(
+    'bookmarks save without stopping, support notes, search and return to the passage',
+    (tester) async {
+      await _withReader(tester, (h) async {
+        await h.tts.playFromParagraph(4);
+        await h.importer.saveCurrentBookmark();
+        final session = h.tts.playbackSessionId;
+        await _scrollTo(tester, find.text('Bookmarks'));
+        await tester.tap(find.text('Bookmarks'));
+        await tester.pumpAndSettle();
+        expect(find.byType(BookmarkSheet), findsOneWidget);
+        await tester.tap(find.byTooltip('Bookmark actions'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Edit note'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byType(TextField).last,
+          'The lighthouse clue',
+        );
+        await tester.tap(find.text('Save note'));
+        await tester.pumpAndSettle();
+        expect(h.tts.isPlaying, isTrue);
+        expect(h.tts.playbackSessionId, session);
+        expect(find.text('The lighthouse clue'), findsOneWidget);
+        await h.capture(tester, 'audit-bookmarks-notes');
+        await tester.enterText(find.byType(TextField).last, 'lighthouse');
+        await tester.pumpAndSettle();
+        expect(find.text('The lighthouse clue'), findsOneWidget);
+        await h.tts.pause();
+        await tester.tap(find.text('The lighthouse clue'));
+        await tester.pumpAndSettle();
+        expect(h.tts.currentParagraphIndex, 4);
+        expect(h.tts.isPlaying, isFalse);
+        expect(tester.takeException(), isNull);
+      });
+    },
+  );
+
+  testWidgets(
+    'library sorting persists and search still filters sorted books',
+    (tester) async {
+      await _withReader(tester, (h) async {
+        await tester.tap(find.byTooltip('Library'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Sort books'));
+        await tester.pumpAndSettle();
+        await h.capture(tester, 'audit-book-sort-menu');
+        await tester.tap(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is CheckedPopupMenuItem<String> &&
+                widget.value == 'title',
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          Provider.of<StorageService>(
+            tester.element(find.text('Book List')),
+            listen: false,
+          ).librarySort,
+          'title',
+        );
+        await h.capture(tester, 'audit-book-list-sorted');
+        final sheet = find.byType(ReaderListSheet<NovelBook>);
+        Finder bookTitle(String title) =>
+            find.descendant(of: sheet, matching: find.text(title));
+        expect(
+          tester.getTopLeft(bookTitle('Evening notes')).dy,
+          lessThan(tester.getTopLeft(bookTitle('The Lantern Keeper')).dy),
+        );
+        await tester.enterText(find.byType(TextField).last, 'lantern');
+        await tester.pumpAndSettle();
+        expect(bookTitle('The Lantern Keeper'), findsOneWidget);
+        expect(bookTitle('Evening notes'), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    },
+  );
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('bookmark notes fit narrow screens and large text in $mode', (
+      tester,
+    ) async {
+      await _withReader(
+        tester,
+        (h) async {
+          await h.theme.setThemeMode(mode);
+          await h.importer.saveCurrentBookmark(
+            note: 'A saved passage to revisit',
+          );
+          await tester.pumpAndSettle();
+          await _scrollTo(tester, find.text('Bookmarks'));
+          await tester.tap(find.text('Bookmarks'));
+          await tester.pumpAndSettle();
+          await h.capture(
+            tester,
+            'audit-bookmarks-${mode == ThemeMode.dark ? 'dark' : 'light'}-large',
+          );
+          await tester.enterText(find.byType(TextField).last, 'saved passage');
+          tester.view.viewInsets = const FakeViewPadding(bottom: 180);
+          await tester.pumpAndSettle();
+          expect(find.text('A saved passage to revisit'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+        size: const Size(320, 568),
+        textScale: 2,
+      );
+    });
+  }
 
   testWidgets(
     'a list opened before loading centers its selection when data arrives',

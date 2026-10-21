@@ -43,6 +43,26 @@ Play, Pause, and Stop stay available while scrolling and in full reading views. 
 
 The home screen groups the current book and chapter above the compact editable text. Now reading stays below it, with previous/next paragraph arrows, Play from paragraph, and View full. Tap the selected-voice row to open voice and playback settings. While typing, the screen prioritizes the editor and keeps the playback dock accessible.
 
+### Bookmarks And Notes (1.3.0)
+
+In a saved book, use **Save bookmark** in Now reading, the full reading view,
+or More options. This saves the start of the current paragraph without pausing
+or restarting narration. Saving the same location again does not duplicate it
+or erase its note. Bookmarks work with EPUB/PDF books and imported web pages in
+Book List, not unsaved pasted/edited text or standalone TXT imports.
+
+Open **Bookmarks** or **More options > Bookmarks & notes**. Search by chapter,
+passage, paragraph number, or note. Tap an entry to jump; a paused/stopped reader
+does not start automatically. Use its action menu for **Play from bookmark**,
+**Edit note**, or confirmed deletion. Up to 500 bookmarks per book and 1,000
+visible characters per note are supported. Bookmarks and notes are local-only;
+there is no cloud sync or export. Deleting the book also clears its bookmarks.
+
+The **Sort books** icon in Book List offers **Newest first**, **Title A to Z**,
+and **Most chapters**. The selection is remembered; search still applies to the
+sorted list. These features require version 1.3.0; they are not in the earlier
+1.2.4 build.
+
 Voice and language changes apply at the next speech segment without requiring manual Play. A paused reader stays paused. Neural reading positions are saved at segment boundaries, not at individual spoken words; reopening may repeat part of a segment.
 
 Notification, lock-screen, and Bluetooth controls use the same transport state as the in-app controls. A headphone disconnect pauses playback. Reconnecting alone does not start speech. A temporary audio interruption may pause and later resume speech only if you have not paused or stopped it; permanent audio-focus loss requires manual Play.

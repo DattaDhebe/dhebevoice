@@ -26,7 +26,9 @@ class NovelLibraryService {
 
     final raw = await file.readAsString();
     if (raw.trim().isEmpty) {
-      return const [];
+      throw const FormatException(
+        'The saved Book List is empty or incomplete.',
+      );
     }
 
     return raw.length < 128 * 1024

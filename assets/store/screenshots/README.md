@@ -32,7 +32,8 @@ accounts, device dumps, or Test launcher labels appear in the published images.
 
 The chapter-browser screen was excluded after capture testing revealed that
 Roman-numeral EPUB headings can receive an incorrect numeric badge from a
-digit in the local file identifier. That issue needs a separate fix.
+digit in the local file identifier. This issue is fixed in current source;
+these captures still represent the submitted 1.2.4 reading experience.
 
 ## Demonstration Books
 

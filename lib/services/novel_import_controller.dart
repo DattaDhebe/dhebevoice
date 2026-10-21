@@ -2,8 +2,11 @@ import 'package:flutter/foundation.dart';
 
 import '../models/import_cancellation.dart';
 import '../models/novel_book.dart';
+import '../models/chapter_number.dart';
+import '../models/reading_bookmark.dart';
 import 'file_import_service.dart';
 import 'novel_library_service.dart';
+import 'reader_bookmark_store.dart';
 import 'storage_service.dart';
 import 'tts_service.dart';
 import 'web_novel_import_service.dart';
@@ -19,6 +22,7 @@ class NovelImportController extends ChangeNotifier {
        _fileImportService = fileImportService,
        _novelLibraryService = novelLibraryService,
        _webNovelImportService = webNovelImportService,
+       _bookmarks = ReaderBookmarkStore(storageService),
        _ttsService = ttsService {
     _ttsService.setPlaybackCompletedHandler(_handlePlaybackCompleted);
   }
@@ -28,6 +32,7 @@ class NovelImportController extends ChangeNotifier {
   final NovelLibraryService _novelLibraryService;
   final WebNovelImportService _webNovelImportService;
   final TtsService _ttsService;
+  final ReaderBookmarkStore _bookmarks;
 
   List<NovelBook> _library = const [];
   NovelBook? _activeNovel;
@@ -415,6 +420,98 @@ class NovelImportController extends ChangeNotifier {
     );
   }
 
+  List<ReadingBookmark> bookmarksForBook(String bookId) =>
+      _bookmarks.forBook(bookId);
+
+  Future<void> saveCurrentBookmark({String note = ''}) async {
+    final book = _activeNovel;
+    final chapter = activeChapter;
+    if (book == null ||
+        chapter == null ||
+        chapter.url.isEmpty ||
+        chapter.content != _ttsService.text ||
+        _ttsService.paragraphCount == 0) {
+      throw StateError('Open a saved book before adding a bookmark.');
+    }
+    final paragraph = _ttsService.currentParagraph;
+    var end = paragraph.length.clamp(0, 280);
+    if (end > 0 &&
+        end < paragraph.length &&
+        paragraph.codeUnitAt(end - 1) >= 0xD800 &&
+        paragraph.codeUnitAt(end - 1) <= 0xDBFF) {
+      end--;
+    }
+    final position = _ttsService.currentParagraphOffset;
+    final existing = _bookmarks
+        .forBook(book.id)
+        .where(
+          (mark) => mark.chapterUrl == chapter.url && mark.position == position,
+        )
+        .firstOrNull;
+    await _bookmarks.save(
+      book.id,
+      ReadingBookmark(
+        chapterUrl: chapter.url,
+        chapterTitle: chapter.title,
+        position: position,
+        paragraphIndex: _ttsService.currentParagraphIndex,
+        excerpt: paragraph.substring(0, end),
+        createdAt: DateTime.now(),
+        note: note.isEmpty ? existing?.note ?? '' : note.trim(),
+      ),
+    );
+    notifyListeners();
+  }
+
+  Future<void> updateBookmark(
+    String bookId,
+    ReadingBookmark bookmark,
+    String note,
+  ) async {
+    if (!_library.any((book) => book.id == bookId)) {
+      throw StateError('This book is no longer in your Book List.');
+    }
+    if (!_bookmarks.forBook(bookId).any((mark) => mark.id == bookmark.id)) {
+      throw StateError('This bookmark is no longer available.');
+    }
+    await _bookmarks.save(bookId, bookmark.copyWith(note: note.trim()));
+    notifyListeners();
+  }
+
+  Future<void> deleteBookmark(String bookId, ReadingBookmark bookmark) async {
+    await _bookmarks.remove(bookId, bookmark.id);
+    notifyListeners();
+  }
+
+  Future<void> openBookmark(
+    String bookId,
+    ReadingBookmark bookmark, {
+    bool play = false,
+  }) async {
+    final book = _library.where((entry) => entry.id == bookId).firstOrNull;
+    if (book == null) {
+      throw StateError('This book is no longer in your Book List.');
+    }
+    final index = book.chapters.indexWhere(
+      (chapter) => chapter.url == bookmark.chapterUrl,
+    );
+    if (index < 0 ||
+        bookmark.position < 0 ||
+        bookmark.position >= book.chapters[index].content.length) {
+      throw StateError(
+        'This bookmarked chapter has changed or is no longer available.',
+      );
+    }
+    await _activateChapter(
+      novel: book,
+      chapterIndex: index,
+      persistLastRead: true,
+      initialPosition: bookmark.position,
+      resumePlayback:
+          play || _ttsService.isPlaying || _ttsService.isAdvancingChapter,
+    );
+  }
+
   Future<void> selectChapter(
     int chapterIndex, {
     bool resumePlayback = false,
@@ -444,18 +541,27 @@ class NovelImportController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> deleteNovel(String novelId) async {
+  Future<String?> deleteNovel(String novelId) async {
+    String? warning;
     await _mutateLibrary(() async {
       final updated = _library.where((book) => book.id != novelId).toList();
       await _novelLibraryService.saveLibrary(updated);
       _library = updated;
+      try {
+        await _bookmarks.removeBook(novelId);
+      } catch (_) {
+        warning =
+            'Book removed, but its bookmarks could not be cleared. Please try again after freeing storage.';
+      }
     });
 
-    if (_activeNovel?.id == novelId) {
+    if (_activeNovel?.id == novelId &&
+        !_library.any((book) => book.id == novelId)) {
       await clearActiveNovel();
     } else {
       notifyListeners();
     }
+    return warning;
   }
 
   Future<void> detachIfTextChanged(String value) async {
@@ -543,6 +649,7 @@ class NovelImportController extends ChangeNotifier {
     bool stopPlayback = true,
     int? expectedPlaybackSession,
     bool resumePlayback = false,
+    int? initialPosition,
   }) async {
     final activation = ++_chapterActivationId;
     var playbackSession =
@@ -569,12 +676,14 @@ class NovelImportController extends ChangeNotifier {
     final textUpdate = _ttsService.updateText(
       novel.chapters[chapterIndex].content,
       resetPosition: true,
-      initialPosition: stopPlayback
-          ? _storageService.positionForChapter(
-              novel.id,
-              novel.chapters[chapterIndex].url,
-            )
-          : 0,
+      initialPosition:
+          initialPosition ??
+          (stopPlayback
+              ? _storageService.positionForChapter(
+                  novel.id,
+                  novel.chapters[chapterIndex].url,
+                )
+              : 0),
     );
     _activeNovel = novel;
     _activeChapterIndex = chapterIndex;
@@ -654,15 +763,12 @@ class NovelImportController extends ChangeNotifier {
           chapters.putIfAbsent(_sourceKey(chapter.url), () => chapter);
         }
         final merged = chapters.values.toList();
-        int? number(NovelChapter c) => int.tryParse(
-          RegExp(
-                r'(?:chapter|episode|part)[\s_-]*(\d+)',
-                caseSensitive: false,
-              ).firstMatch(c.title)?.group(1) ??
-              '',
-        );
-        if (merged.every((c) => number(c) != null)) {
-          merged.sort((a, b) => number(a)!.compareTo(number(b)!));
+        final numbers = {
+          for (final chapter in merged)
+            chapter.url: ChapterNumber.parse(chapter.title, url: chapter.url),
+        };
+        if (numbers.values.every((number) => number != null)) {
+          merged.sort((a, b) => numbers[a.url]!.compareTo(numbers[b.url]!));
         }
         final lastUrl = existing.chapters.isEmpty
             ? null
@@ -693,9 +799,10 @@ class NovelImportController extends ChangeNotifier {
       }
       await _novelLibraryService.saveLibrary(updated);
       final activeUrl = activeChapter?.url;
+      final currentById = {for (final book in _library) book.id: book};
       // Chapter selection can change while the disk write is in flight.
       _library = updated.map((book) {
-        final current = _library.where((b) => b.id == book.id).firstOrNull;
+        final current = currentById[book.id];
         if (current == null || current.chapters.isEmpty) return book;
         final url = current
             .chapters[current.lastReadChapterIndex.clamp(

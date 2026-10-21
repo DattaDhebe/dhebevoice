@@ -109,7 +109,9 @@ void main() {
     messenger.setMockMethodCallHandler(const MethodChannel('flutter_tts'), (
       call,
     ) async {
-      if (call.method == 'getVoices') return <Object>[];
+      if (call.method == 'getVoices') {
+        return [{'name': 'en-in-x-ene-local', 'locale': 'en-IN'}];
+      }
       return 1;
     });
     messenger.setMockMethodCallHandler(
@@ -292,4 +294,122 @@ void main() {
     expect(importer.library, hasLength(1));
     expect(importer.importStatus, contains('Stopped'));
   });
+
+  test(
+    'bookmark saves paragraph start without stopping playback or rewriting books',
+    () async {
+      library.books = [
+        book('existing', [1, 2]),
+      ];
+      await importer.initialize();
+      await importer.selectNovel('existing');
+      await tts.playFromParagraph(1);
+      final session = tts.playbackSessionId;
+      final saves = library.saves;
+      await importer.saveCurrentBookmark(note: 'Return here');
+      final saved = importer.bookmarksForBook('existing').single;
+      expect(saved.paragraphIndex, 1);
+      expect(saved.position, tts.text.indexOf('Paragraph two.'));
+      expect(saved.note, 'Return here');
+      expect(tts.isPlaying, isTrue);
+      expect(tts.playbackSessionId, session);
+      expect(library.saves, saves);
+      await importer.saveCurrentBookmark();
+      expect(importer.bookmarksForBook('existing'), hasLength(1));
+      expect(importer.bookmarksForBook('existing').single.note, 'Return here');
+      await importer.updateBookmark('existing', saved, '');
+      expect(importer.bookmarksForBook('existing').single.note, isEmpty);
+    },
+  );
+
+  test(
+    'bookmark navigates by stable chapter URL after earlier chapters are merged',
+    () async {
+      library.books = [
+        book('existing', [2, 3]),
+      ];
+      await importer.initialize();
+      await importer.selectNovel('existing', chapterIndex: 1);
+      await tts.playFromParagraph(1);
+      await tts.pause();
+      await importer.saveCurrentBookmark();
+      final saved = importer.bookmarksForBook('existing').single;
+      web.result = NovelImportResult(book: book('incoming', [1, 2]));
+      await importer.importNovelFromUrl('https://books.test/story');
+      await importer.selectChapter(0);
+      await importer.openBookmark('existing', saved);
+      expect(importer.activeChapter!.title, 'Chapter 3 - Title');
+      expect(importer.activeChapterIndex, 2);
+      expect(tts.currentParagraphIndex, 1);
+      expect(tts.currentCharIndex, saved.position);
+      expect(tts.isPlaying, isFalse);
+      await importer.openBookmark('existing', saved, play: true);
+      expect(tts.isPlaying, isTrue);
+      expect(tts.currentParagraphIndex, 1);
+    },
+  );
+
+  test(
+    'manual or edited text cannot attach a bookmark to an unrelated book',
+    () async {
+      await expectLater(importer.saveCurrentBookmark(), throwsStateError);
+      library.books = [
+        book('existing', [1]),
+      ];
+      await importer.initialize();
+      await importer.selectNovel('existing');
+      await tts.updateText('Different text.');
+      await expectLater(importer.saveCurrentBookmark(), throwsStateError);
+      expect(importer.bookmarksForBook('existing'), isEmpty);
+    },
+  );
+
+  test(
+    'book deletion removes bookmarks and stale navigation is rejected',
+    () async {
+      library.books = [
+        book('existing', [1]),
+      ];
+      await importer.initialize();
+      await importer.selectNovel('existing');
+      await importer.saveCurrentBookmark();
+      final saved = importer.bookmarksForBook('existing').single;
+      await importer.deleteNovel('existing');
+      expect(importer.bookmarksForBook('existing'), isEmpty);
+      await expectLater(
+        importer.openBookmark('existing', saved),
+        throwsStateError,
+      );
+    },
+  );
+
+  test(
+    'roman-numbered chapter imports sort once and preserve the active chapter',
+    () async {
+      NovelBook roman(List<int> indices) => book('existing', indices).copyWith(
+        chapters: [
+          for (final i in indices)
+            NovelChapter(
+              title: 'Chapter ${['I', 'II', 'III'][i - 1]} - Heading',
+              url: 'https://books.test/story/chapter-$i',
+              content: 'Story $i.',
+              order: i - 1,
+            ),
+        ],
+      );
+      library.books = [
+        roman([2, 3]),
+      ];
+      await importer.initialize();
+      await importer.selectNovel('existing');
+      web.result = NovelImportResult(book: roman([1, 2]));
+      await importer.importNovelFromUrl('https://books.test/story');
+      expect(importer.library.single.chapters.map((c) => c.title), [
+        'Chapter I - Heading',
+        'Chapter II - Heading',
+        'Chapter III - Heading',
+      ]);
+      expect(importer.activeChapterIndex, 1);
+    },
+  );
 }

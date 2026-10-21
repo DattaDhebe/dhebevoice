@@ -104,6 +104,26 @@ class StorageService {
   bool get hasSeenHomeGuide => _prefs.getBool(_homeGuideSeenKey) ?? false;
   bool get hasSeededSampleBook => _prefs.getBool(_sampleBookSeededKey) ?? false;
 
+  String get librarySort => _prefs.getString('reader_library_sort') ?? 'newest';
+  Future<void> saveLibrarySort(String value) async {
+    if (!const {'newest', 'title', 'chapters'}.contains(value)) {
+      throw ArgumentError.value(value);
+    }
+    if (!await _prefs.setString('reader_library_sort', value)) {
+      throw StateError('Could not save the Book List sort order.');
+    }
+  }
+
+  String? bookmarkData(String bookId) =>
+      _prefs.getString('reader_bookmarks_$bookId');
+  Future<void> saveBookmarkData(String bookId, String? value) async {
+    final key = 'reader_bookmarks_$bookId';
+    final saved = value == null
+        ? await _prefs.remove(key)
+        : await _prefs.setString(key, value);
+    if (!saved) throw StateError('Could not save bookmarks. Please try again.');
+  }
+
   int? chapterIndexForNovel(String id) => _prefs.getInt('reader_chapter_$id');
 
   int positionForChapter(String id, String chapter) =>

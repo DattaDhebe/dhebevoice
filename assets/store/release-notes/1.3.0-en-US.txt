@@ -1,0 +1,5 @@
+Save paragraph bookmarks with personal notes, search saved passages, and jump or play from them.
+Sort your Book List by newest, title, or chapter count; your choice is remembered.
+Improve chapter numbering, including Roman numerals.
+Make library loading and temporary audio preparation safer, and reduce repeated work during imports.
+Bookmarks and notes stay on your device. No paid TTS API is required.
