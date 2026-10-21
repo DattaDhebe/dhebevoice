@@ -48,7 +48,8 @@ there is no claim of gapless playback or faster inference from this work.
 
 The final automated pass reports 254 passing Flutter tests, 36 passing native
 tests with no skips, and four passing real-font UI capture checks. The separate
-Test APK build succeeds. Static analysis is checked separately before handoff.
+Test APK build succeeds, and static analysis is clean. The signed 1.3.0 (13)
+bundle also passes signature, identity, ABI, and 16 KB native-alignment checks.
 
 The regression suite covers persistence failures, corruption, duplicate marks,
 chapter reordering, playback-state preservation, sorting, narrow screens, large
@@ -56,4 +57,6 @@ text, and both themes. Native tests include real-model checks when the verified
 local pack is available. The separate Test APK is built without modifying the
 Play-installed app. No phone was connected for this pass, so Bluetooth,
 lock-screen behavior, interruption handling, and long background sessions still
-need device testing. These source changes have not been submitted to Play.
+need device testing. The bundle is uploaded to Play and has passed automated
+pre-review checks, but its review submission is not confirmed. See the
+[release status](../CHANGELOG.md); upload is not review approval or availability.

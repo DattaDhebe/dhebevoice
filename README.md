@@ -50,7 +50,7 @@ DhebeVoice is an Android text-to-speech reader built with Flutter and Kotlin. Li
   </tr>
 </table>
 
-Real Android captures of the 1.2.4 reading experience, taken on October 17, 2026. Version 1.2.4 (12) and these screenshots have been submitted to Play closed testing; submission is not approval. The books were imported for this demonstration, not bundled with the app. See [all seven upload-ready screenshots and content credits](assets/store/screenshots/README.md).
+Real Android captures of the 1.2.4 reading experience, taken on October 17, 2026. Version 1.2.4 (12) is available to Alpha testers; the newer 1.3.0 bundle is uploaded but its review submission is not confirmed. See the [release status](CHANGELOG.md). The books were imported for this demonstration, not bundled with the app. See [all seven upload-ready screenshots and content credits](assets/store/screenshots/README.md).
 
 ## Features
 

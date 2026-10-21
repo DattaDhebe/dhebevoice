@@ -4,8 +4,18 @@ This file distinguishes current source changes from previously uploaded app bund
 
 ## 1.3.0 (13)
 
-Prepared on October 21, 2026, for the existing Google Play Closed testing -
-Alpha track. This bundle has not yet been submitted or approved.
+Uploaded and saved on October 21, 2026, for the existing Google Play Closed
+testing - Alpha track. Play's automated pre-review checks completed successfully,
+but review submission is not confirmed: the Console continued to show
+**Changes not yet submitted for review** after confirmation attempts. An attempt
+returned **An unexpected error has occurred. Please try again. (70CB9247)**.
+The release is ready to retry in Publishing overview, not approved or live.
+
+Validation: 254 Flutter tests, 36 native tests, clean static analysis, matching
+upload certificate, all three ABIs, and 16 KB native alignment. Play reports no
+loss of supported devices. Physical-device Bluetooth, lock-screen, and extended
+background playback checks were not repeated because no phone was connected.
+[Release-note text](assets/store/release-notes/1.3.0-en-US.txt).
 
 - Add offline paragraph bookmarks with editable, searchable notes and jump/play actions; store small metadata separately from full books.
 - Add remembered Book List sorting by date, title, or chapter count.
@@ -19,9 +29,9 @@ Alpha track. This bundle has not yet been submitted or approved.
 ## 1.2.4 (12)
 
 Submitted on October 17, 2026, to the existing Google Play Closed testing -
-Alpha track together with the updated phone screenshots. Play Console shows
-**Changes in review**; automated quick checks run before review. This is not a
-claim of approval or public production availability.
+Alpha track together with the updated phone screenshots. On October 21, Play
+Console confirmed this release was **Available to testers on Google Play**.
+This is closed-testing availability, not public production availability.
 
 - Refresh the home reader with clearer book/chapter hierarchy, a compact borderless editor, an uncluttered empty state, and a persistent playback dock.
 - Add home-screen paragraph shortcuts and direct voice-settings access; preserve full reading views, imports, text selection, and existing playback behavior.

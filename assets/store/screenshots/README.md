@@ -1,15 +1,15 @@
 # Store Screenshots
 
-Seven real-device captures of the current DhebeVoice development UI, taken on
+Seven real-device captures of the DhebeVoice 1.2.4 UI, taken on
 October 17, 2026, using the separate DhebeVoice Test app on Android 16. They
 show the 1.2.4 reading experience and replace the older 1.2.3 listing images.
 
 All seven replacement phone screenshots were uploaded and saved as a Google
 Play Console listing draft on October 17, 2026, then submitted together with
-version 1.2.4 (12) to Closed testing - Alpha on the same day. Play Console shows
-**Changes in review**, with automated quick checks still running. This is not
-a claim that the update is approved or live. The icon, feature graphic, listing
-descriptions, tester audience, and publishing mode were left unchanged.
+version 1.2.4 (12) to Closed testing - Alpha on the same day. On October 21,
+Play Console confirmed that release was available to Alpha testers. This is not
+public production availability. The icon, feature graphic, listing descriptions,
+tester audience, and publishing mode were left unchanged.
 
 ## Upload Order
 
